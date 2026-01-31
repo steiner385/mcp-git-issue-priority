@@ -143,6 +143,25 @@ Arguments:
   - repository (required): "owner/repo" format
 ```
 
+### `sync_backlog_labels`
+
+Detect and optionally fix issues missing required priority/type/status labels.
+
+```
+Arguments:
+  - repository (required): "owner/repo" format
+  - mode (optional): "report" (default) to list issues, "update" to apply labels
+  - defaultPriority (optional): P0 | P1 | P2 | P3 (defaults to P2)
+  - defaultType (optional): bug | feature | chore | docs (defaults to feature)
+```
+
+In **report mode**, returns a list of all issues missing labels with details about what's missing.
+
+In **update mode**, applies default labels to issues:
+- Missing priority → `priority:P2` (or specified default)
+- Missing type → `type:feature` (or specified default)
+- Missing status → `status:backlog`
+
 ## Priority Scoring Algorithm
 
 Issues are scored using a deterministic formula:

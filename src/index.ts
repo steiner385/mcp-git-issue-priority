@@ -13,6 +13,7 @@ import { registerReleaseLockTool } from './tools/release-lock.js';
 import { registerForceClaimTool } from './tools/force-claim.js';
 import { registerGetWorkflowStatusTool } from './tools/get-workflow-status.js';
 import { registerListBacklogTool } from './tools/list-backlog.js';
+import { registerSyncBacklogLabelsTool } from './tools/sync-backlog-labels.js';
 
 async function main() {
   try {
@@ -36,6 +37,7 @@ async function main() {
     registerForceClaimTool(server);
     registerGetWorkflowStatusTool(server);
     registerListBacklogTool(server);
+    registerSyncBacklogLabelsTool(server);
 
     const transport = new StdioServerTransport();
     await server.connect(transport);

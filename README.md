@@ -15,32 +15,45 @@ A Model Context Protocol (MCP) server that enables AI assistants to manage GitHu
 
 ### Prerequisites
 
-- Node.js 18+
-- A GitHub personal access token with `repo` scope
+- Node.js 20+
+- GitHub authentication (one of the following):
+  - GitHub CLI (`gh`) installed and authenticated, OR
+  - A GitHub personal access token with `repo` scope
 
-### Install from npm
+### Install from GitHub
 
 ```bash
-npm install -g mcp-git-issue-priority
+npm install -g github:steiner385/mcp-git-issue-priority
 ```
+
+This will automatically build the package after installation.
 
 ### Install from source
 
 ```bash
-git clone https://github.com/yourusername/mcp-git-issue-priority.git
+git clone https://github.com/steiner385/mcp-git-issue-priority.git
 cd mcp-git-issue-priority
 npm install
-npm run build
 npm link
 ```
 
 ## Configuration
 
-### Environment Variables
+### GitHub Authentication
 
-```bash
-export GITHUB_TOKEN="ghp_your_personal_access_token"
-```
+The server supports multiple authentication methods (checked in order):
+
+1. **Environment variable** - Set `GITHUB_TOKEN`:
+   ```bash
+   export GITHUB_TOKEN="ghp_your_personal_access_token"
+   ```
+
+2. **GitHub CLI** - If `gh` is installed and authenticated, the token is retrieved automatically:
+   ```bash
+   gh auth login  # One-time setup
+   ```
+
+If you're already using GitHub CLI or VS Code with GitHub authentication, option 2 provides seamless authentication without managing tokens manually.
 
 ### Claude Code Configuration
 
@@ -49,7 +62,19 @@ Add to your Claude Code MCP settings (`~/.claude.json` or project settings):
 ```json
 {
   "mcpServers": {
-    "github-issues": {
+    "github-issue-priority": {
+      "command": "mcp-git-issue-priority"
+    }
+  }
+}
+```
+
+If you're using GitHub CLI authentication, no additional configuration is needed. Otherwise, add your token:
+
+```json
+{
+  "mcpServers": {
+    "github-issue-priority": {
       "command": "mcp-git-issue-priority",
       "env": {
         "GITHUB_TOKEN": "ghp_your_personal_access_token"

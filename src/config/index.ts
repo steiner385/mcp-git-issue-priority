@@ -1,6 +1,7 @@
 import { homedir } from 'os';
 import { join } from 'path';
 import { mkdir } from 'fs/promises';
+import { execFileSync } from 'child_process';
 
 export interface Config {
   baseDir: string;
@@ -40,10 +41,31 @@ export function generateSessionId(): string {
   return crypto.randomUUID();
 }
 
+/**
+ * Attempts to get a GitHub token from the GitHub CLI (`gh auth token`).
+ * Returns null if gh is not installed or not authenticated.
+ */
+function getGitHubCliToken(): string | null {
+  try {
+    const token = execFileSync('gh', ['auth', 'token'], {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    return token || null;
+  } catch {
+    return null;
+  }
+}
+
 export function createConfig(githubToken?: string): Config {
-  const token = githubToken ?? process.env.GITHUB_TOKEN;
+  // Try sources in order: explicit param, env var, GitHub CLI
+  const token = githubToken ?? process.env.GITHUB_TOKEN ?? getGitHubCliToken();
   if (!token) {
-    throw new Error('GITHUB_TOKEN environment variable is required');
+    throw new Error(
+      'GitHub authentication required. Either:\n' +
+        '  1. Set GITHUB_TOKEN environment variable, or\n' +
+        '  2. Install and authenticate GitHub CLI: gh auth login'
+    );
   }
 
   return {

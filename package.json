@@ -16,6 +16,7 @@
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src tests",
     "format": "prettier --write src tests",
+    "prepare": "npm run build",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

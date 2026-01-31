@@ -1,0 +1,218 @@
+# MCP GitHub Issue Priority Server
+
+A Model Context Protocol (MCP) server that enables AI assistants to manage GitHub issues with deterministic priority scoring and concurrency-safe selection.
+
+## Features
+
+- **Priority-Based Issue Selection**: Deterministic scoring algorithm ensures consistent issue prioritization across sessions
+- **Concurrency-Safe Locking**: File-based atomic locking prevents multiple AI sessions from selecting the same issue
+- **Guided Workflow**: 8-phase workflow (selection → research → branch → implementation → testing → commit → pr → review) with transition validation
+- **Automatic Labeling**: Creates and manages priority (`P0`-`P3`), type (`bug`, `feature`, `chore`, `docs`), and status labels
+- **Stale Lock Detection**: Automatically detects and cleans up locks from dead processes
+- **Audit Logging**: JSON Lines logging for all operations with 30-day retention
+
+## Installation
+
+### Prerequisites
+
+- Node.js 18+
+- A GitHub personal access token with `repo` scope
+
+### Install from npm
+
+```bash
+npm install -g mcp-git-issue-priority
+```
+
+### Install from source
+
+```bash
+git clone https://github.com/yourusername/mcp-git-issue-priority.git
+cd mcp-git-issue-priority
+npm install
+npm run build
+npm link
+```
+
+## Configuration
+
+### Environment Variables
+
+```bash
+export GITHUB_TOKEN="ghp_your_personal_access_token"
+```
+
+### Claude Code Configuration
+
+Add to your Claude Code MCP settings (`~/.claude.json` or project settings):
+
+```json
+{
+  "mcpServers": {
+    "github-issues": {
+      "command": "mcp-git-issue-priority",
+      "env": {
+        "GITHUB_TOKEN": "ghp_your_personal_access_token"
+      }
+    }
+  }
+}
+```
+
+## Available Tools
+
+### `create_issue`
+
+Create a new GitHub issue with mandatory priority and type labels.
+
+```
+Arguments:
+  - title (required): Issue title
+  - body (optional): Issue description
+  - priority (required): P0 (critical) | P1 (high) | P2 (medium) | P3 (low)
+  - type (required): bug | feature | chore | docs
+  - repository (required): "owner/repo" format
+```
+
+### `select_next_issue`
+
+Select and lock the highest-priority issue from the backlog. Uses deterministic scoring to ensure consistent selection.
+
+```
+Arguments:
+  - repository (required): "owner/repo" format
+  - type (optional): Filter by issue type
+  - maxPriority (optional): Only consider issues at or above this priority
+```
+
+### `list_backlog`
+
+List all open issues in priority order without acquiring locks (read-only).
+
+```
+Arguments:
+  - repository (required): "owner/repo" format
+  - type (optional): Filter by issue type
+  - limit (optional): Maximum issues to return (default: 20)
+```
+
+### `advance_workflow`
+
+Advance the workflow to the next phase for a locked issue.
+
+```
+Arguments:
+  - issueNumber (required): Issue number to advance
+  - targetPhase (required): research | branch | implementation | testing | commit | pr | review
+  - repository (required): "owner/repo" format
+  - testsPassed (optional): Required when advancing to 'commit' phase
+  - prTitle (optional): Required for 'pr' phase
+  - prBody (optional): Required for 'pr' phase
+  - skipJustification (optional): Required if skipping phases
+```
+
+### `get_workflow_status`
+
+Get the current workflow status for locked issues.
+
+```
+Arguments:
+  - issueNumber (optional): Specific issue number
+  - repository (optional): "owner/repo" format
+```
+
+### `release_lock`
+
+Release lock on an issue (on completion, abandonment, or merge).
+
+```
+Arguments:
+  - issueNumber (required): Issue number
+  - reason (required): completed | abandoned | merged
+  - repository (required): "owner/repo" format
+```
+
+### `force_claim`
+
+Force claim an issue locked by another session (requires confirmation).
+
+```
+Arguments:
+  - issueNumber (required): Issue number to claim
+  - confirmation (required): Must be exactly "I understand this may cause conflicts"
+  - repository (required): "owner/repo" format
+```
+
+## Priority Scoring Algorithm
+
+Issues are scored using a deterministic formula:
+
+```
+score = (basePoints + ageBonus) * blockingMultiplier
+```
+
+- **Base Points**: P0=1000, P1=100, P2=10, P3=1
+- **Age Bonus**: +1 point per day since creation (max 365)
+- **Blocking Multiplier**: 1.5x for issues with "blocking" label
+- **Tiebreaker**: Earlier creation date wins (FIFO)
+
+## Workflow Phases
+
+1. **selection**: Issue selected and locked
+2. **research**: Understanding the problem
+3. **branch**: Feature branch created
+4. **implementation**: Code changes in progress
+5. **testing**: Running tests and validation
+6. **commit**: Changes committed
+7. **pr**: Pull request created
+8. **review**: Awaiting review/merge
+
+## Data Storage
+
+All data is stored locally in `~/.mcp-git-issue-priority/`:
+
+```
+~/.mcp-git-issue-priority/
+├── locks/          # Active lock files (.lockdata)
+├── workflow/       # Workflow state files (.json)
+└── logs/           # Audit logs (JSON Lines format)
+```
+
+## Development
+
+### Build
+
+```bash
+npm run build
+```
+
+### Test
+
+```bash
+npm test
+```
+
+### Lint
+
+```bash
+npm run lint
+```
+
+### Type Check
+
+```bash
+npm run typecheck
+```
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+## Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## Support
+
+- [Open an issue](https://github.com/steiner385/mcp-git-issue-priority/issues) for bug reports or feature requests
+- Check existing issues before creating new ones

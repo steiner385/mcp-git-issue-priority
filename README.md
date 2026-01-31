@@ -2,6 +2,33 @@
 
 A Model Context Protocol (MCP) server that enables AI assistants to manage GitHub issues with deterministic priority scoring and concurrency-safe selection.
 
+## Quick Start
+
+```bash
+# 1. Install
+npm install -g github:steiner385/mcp-git-issue-priority
+
+# 2. Authenticate (if not already using GitHub CLI)
+gh auth login
+
+# 3. Add to Claude Code (~/.claude.json)
+```
+
+```json
+{
+  "mcpServers": {
+    "github-issue-priority": {
+      "command": "mcp-git-issue-priority"
+    }
+  }
+}
+```
+
+```bash
+# 4. Restart Claude Code and verify
+# The MCP tools should appear when you run /mcp
+```
+
 ## Features
 
 - **Priority-Based Issue Selection**: Deterministic scoring algorithm ensures consistent issue prioritization across sessions
@@ -15,10 +42,9 @@ A Model Context Protocol (MCP) server that enables AI assistants to manage GitHu
 
 ### Prerequisites
 
-- Node.js 20+
-- GitHub authentication (one of the following):
-  - GitHub CLI (`gh`) installed and authenticated, OR
-  - A GitHub personal access token with `repo` scope
+- **Node.js 20+** - [Download](https://nodejs.org/)
+- **GitHub CLI** (recommended) - [Install](https://cli.github.com/) and run `gh auth login`
+  - Or: a GitHub personal access token with `repo` scope
 
 ### Install from GitHub
 
@@ -26,9 +52,9 @@ A Model Context Protocol (MCP) server that enables AI assistants to manage GitHu
 npm install -g github:steiner385/mcp-git-issue-priority
 ```
 
-This will automatically build the package after installation.
+The package builds automatically after installation.
 
-### Install from source
+### Install from Source
 
 ```bash
 git clone https://github.com/steiner385/mcp-git-issue-priority.git
@@ -37,27 +63,44 @@ npm install
 npm link
 ```
 
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| `command not found: mcp-git-issue-priority` | Ensure npm global bin is in your PATH: `npm bin -g` |
+| `GitHub authentication required` | Run `gh auth login` or set `GITHUB_TOKEN` |
+| Build errors during install | Ensure Node.js 20+ is installed: `node --version` |
+
 ## Configuration
 
 ### GitHub Authentication
 
-The server supports multiple authentication methods (checked in order):
+The server supports two authentication methods:
 
-1. **Environment variable** - Set `GITHUB_TOKEN`:
-   ```bash
-   export GITHUB_TOKEN="ghp_your_personal_access_token"
-   ```
+#### Recommended: GitHub CLI (automatic)
 
-2. **GitHub CLI** - If `gh` is installed and authenticated, the token is retrieved automatically:
-   ```bash
-   gh auth login  # One-time setup
-   ```
+If you have [GitHub CLI](https://cli.github.com/) installed and authenticated, the server automatically retrieves your token:
 
-If you're already using GitHub CLI or VS Code with GitHub authentication, option 2 provides seamless authentication without managing tokens manually.
+```bash
+# One-time setup
+gh auth login
+```
+
+This is the recommended approach - no manual token management required.
+
+#### Alternative: Environment Variable
+
+Set `GITHUB_TOKEN` with a [personal access token](https://github.com/settings/tokens) that has `repo` scope:
+
+```bash
+export GITHUB_TOKEN="ghp_your_personal_access_token"
+```
+
+Or configure it in your MCP settings (see below).
 
 ### Claude Code Configuration
 
-Add to your Claude Code MCP settings (`~/.claude.json` or project settings):
+Add to `~/.claude.json` (global) or `.claude/settings.json` (project):
 
 ```json
 {
@@ -69,7 +112,7 @@ Add to your Claude Code MCP settings (`~/.claude.json` or project settings):
 }
 ```
 
-If you're using GitHub CLI authentication, no additional configuration is needed. Otherwise, add your token:
+**Using a personal access token instead of GitHub CLI?** Add the token to the config:
 
 ```json
 {
@@ -83,6 +126,14 @@ If you're using GitHub CLI authentication, no additional configuration is needed
   }
 }
 ```
+
+### Verify Installation
+
+After restarting Claude Code:
+
+1. Run `/mcp` to see available MCP servers
+2. The `github-issue-priority` server should be listed with 8 tools
+3. Try `list_backlog` on any repository to confirm it's working
 
 ## Available Tools
 

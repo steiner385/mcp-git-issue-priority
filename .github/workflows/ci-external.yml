@@ -1,0 +1,65 @@
+name: CI (External Contributors)
+
+# This workflow runs for PRs from forks ONLY after owner approval
+# Owner must add the "approved-for-ci" label to trigger this workflow
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [labeled]
+
+jobs:
+  # Only run if the "approved-for-ci" label was just added
+  test-external:
+    if: |
+      github.event.label.name == 'approved-for-ci' &&
+      github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [20.x]
+
+    steps:
+      - name: Checkout PR code safely
+        uses: actions/checkout@v4
+        with:
+          # IMPORTANT: Checkout the PR head, not the merge commit
+          # This is safe because we've manually approved this PR
+          ref: ${{ github.event.pull_request.head.sha }}
+          # Don't persist credentials to prevent token exposure
+          persist-credentials: false
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linting
+        run: npm run lint
+
+      - name: Run type check
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+      - name: Report success
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr comment "$PR_NUMBER" --body "CI passed for this external contribution. Ready for final review."
+
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr comment "$PR_NUMBER" --body "CI failed. Please check the workflow logs and fix the issues."

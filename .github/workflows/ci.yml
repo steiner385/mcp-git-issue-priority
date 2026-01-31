@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    # Only run automatically for PRs from the same repo (not forks)
+    types: [opened, synchronize, reopened]
+
+# Cancel in-progress runs for the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Check if this is an external PR that needs approval
+  check-permissions:
+    runs-on: ubuntu-latest
+    outputs:
+      is-external: ${{ steps.check.outputs.is-external }}
+    steps:
+      - name: Check if external contributor
+        id: check
+        env:
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            if [ "$HEAD_REPO" != "$BASE_REPO" ]; then
+              echo "is-external=true" >> $GITHUB_OUTPUT
+              echo "::warning::External PR detected - requires approval before CI runs"
+              exit 0
+            fi
+          fi
+          echo "is-external=false" >> $GITHUB_OUTPUT
+
+  # Main CI job - only runs for internal PRs or pushes to main
+  test:
+    needs: check-permissions
+    if: needs.check-permissions.outputs.is-external != 'true'
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [20.x]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linting
+        run: npm run lint
+
+      - name: Run type check
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+  # Summary job for branch protection rules
+  ci-complete:
+    needs: [check-permissions, test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check CI status
+        env:
+          IS_EXTERNAL: ${{ needs.check-permissions.outputs.is-external }}
+          TEST_RESULT: ${{ needs.test.result }}
+        run: |
+          if [ "$IS_EXTERNAL" = "true" ]; then
+            echo "::notice::External PR - use approve-ci workflow to run tests"
+            exit 0
+          fi
+          if [ "$TEST_RESULT" = "success" ]; then
+            echo "CI passed!"
+          else
+            echo "CI failed"
+            exit 1
+          fi

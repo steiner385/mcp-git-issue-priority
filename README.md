@@ -5,8 +5,8 @@ A Model Context Protocol (MCP) server that enables AI assistants to manage GitHu
 ## Quick Start
 
 ```bash
-# 1. Install
-npm install -g github:steiner385/mcp-git-issue-priority
+# 1. Install from npm (recommended)
+npm install -g mcp-git-issue-priority
 
 # 2. Authenticate (if not already using GitHub CLI)
 gh auth login
@@ -46,21 +46,24 @@ gh auth login
 - **GitHub CLI** (recommended) - [Install](https://cli.github.com/) and run `gh auth login`
   - Or: a GitHub personal access token with `repo` scope
 
-### Install from GitHub
+### Install from npm (recommended)
 
 ```bash
-npm install -g github:steiner385/mcp-git-issue-priority
+npm install -g mcp-git-issue-priority
 ```
 
-The package builds automatically after installation.
+### Install specific version
 
-### Install from Source
+```bash
+npm install -g mcp-git-issue-priority@1.0.0
+```
+
+### Install from source
 
 ```bash
 git clone https://github.com/steiner385/mcp-git-issue-priority.git
 cd mcp-git-issue-priority
-npm install
-npm link
+npm install && npm link
 ```
 
 ### Troubleshooting
@@ -359,6 +362,41 @@ npm run lint
 ```bash
 npm run typecheck
 ```
+
+## Releasing (Maintainers)
+
+### One-time Setup
+
+1. Create an npm account at https://www.npmjs.com/
+2. Go to https://www.npmjs.com/settings/tokens
+3. Create an "Automation" token with "Publish" permission
+4. Add to GitHub: Settings → Secrets → Actions → New secret named `NPM_TOKEN`
+
+### Creating a Release
+
+```bash
+# Patch release (bug fixes): 1.0.0 → 1.0.1
+npm version patch -m "Release v%s"
+git push && git push --tags
+
+# Minor release (new features): 1.0.0 → 1.1.0
+npm version minor -m "Release v%s"
+git push && git push --tags
+
+# Major release (breaking changes): 1.0.0 → 2.0.0
+npm version major -m "Release v%s"
+git push && git push --tags
+```
+
+Pushing a tag triggers the release workflow which:
+- Runs lint, build, and tests
+- Creates a GitHub release with the tarball attached
+- Publishes to npm registry
+
+### Download Tracking
+
+- **GitHub**: Releases page shows download count per `.tgz` asset
+- **npm**: https://www.npmjs.com/package/mcp-git-issue-priority shows weekly downloads
 
 ## License
 

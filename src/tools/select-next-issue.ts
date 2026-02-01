@@ -4,7 +4,11 @@ import { getGitHubService } from '../services/github.js';
 import { getLockingService } from '../services/locking.js';
 import { getWorkflowService } from '../services/workflow.js';
 import { getLogger } from '../services/logging.js';
-import { filterAndScoreIssues } from '../services/priority.js';
+import {
+  scoreIssuesWithDependencies,
+  comparePriorityScores,
+  applyFilters,
+} from '../services/priority.js';
 import { getTypeLabel, getPriorityLabel } from '../models/index.js';
 
 function parseRepository(repository?: string): { owner: string; repo: string } | null {
@@ -64,10 +68,22 @@ export function registerSelectNextIssueTool(server: McpServer) {
       try {
         const allIssues = await github.listOpenIssues(owner, repo);
 
-        const scoredIssues = filterAndScoreIssues(allIssues, {
+        // Fetch dependency info for all issues
+        const dependencies = new Map<number, number | null>();
+        for (const issue of allIssues) {
+          const parent = await github.getIssueParent(owner, repo, issue.number);
+          if (parent && parent.state === 'open') {
+            dependencies.set(issue.number, parent.number);
+          }
+        }
+
+        // Score with dependencies
+        const filteredIssues = applyFilters(allIssues, {
           includeTypes: args.includeTypes,
           excludeTypes: args.excludeTypes,
         });
+        const scoredIssues = scoreIssuesWithDependencies(filteredIssues, dependencies);
+        scoredIssues.sort((a, b) => comparePriorityScores(a.score, b.score));
 
         if (scoredIssues.length === 0) {
           await logger.warn('select_next_issue', 'No issues match criteria', {

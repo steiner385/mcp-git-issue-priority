@@ -4,3 +4,5 @@ export * from './workflow-state.js';
 export * from './priority-score.js';
 export * from './selection-filter.js';
 export * from './audit-log.js';
+export * from './batch-state.js';
+export * from './pr-status.js';

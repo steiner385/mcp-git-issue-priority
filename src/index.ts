@@ -14,6 +14,11 @@ import { registerForceClaimTool } from './tools/force-claim.js';
 import { registerGetWorkflowStatusTool } from './tools/get-workflow-status.js';
 import { registerListBacklogTool } from './tools/list-backlog.js';
 import { registerSyncBacklogLabelsTool } from './tools/sync-backlog-labels.js';
+import { registerGetPrStatusTool } from './tools/get-pr-status.js';
+import { registerBulkUpdateIssuesTool } from './tools/bulk-update-issues.js';
+import { registerImplementBatchTool } from './tools/implement-batch.js';
+import { registerBatchContinueTool } from './tools/batch-continue.js';
+import { registerGetWorkflowAnalyticsTool } from './tools/get-workflow-analytics.js';
 
 async function main() {
   try {
@@ -38,6 +43,11 @@ async function main() {
     registerGetWorkflowStatusTool(server);
     registerListBacklogTool(server);
     registerSyncBacklogLabelsTool(server);
+    registerGetPrStatusTool(server);
+    registerBulkUpdateIssuesTool(server);
+    registerImplementBatchTool(server);
+    registerBatchContinueTool(server);
+    registerGetWorkflowAnalyticsTool(server);
 
     const transport = new StdioServerTransport();
     await server.connect(transport);

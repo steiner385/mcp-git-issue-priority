@@ -3,7 +3,11 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getGitHubService } from '../services/github.js';
 import { getLockingService } from '../services/locking.js';
 import { getLogger } from '../services/logging.js';
-import { filterAndScoreIssues } from '../services/priority.js';
+import {
+  scoreIssuesWithDependencies,
+  comparePriorityScores,
+  applyFilters,
+} from '../services/priority.js';
 import { getTypeLabel, getPriorityLabel } from '../models/index.js';
 
 function parseRepository(repository?: string): { owner: string; repo: string } | null {
@@ -69,10 +73,22 @@ export function registerListBacklogTool(server: McpServer) {
       try {
         const allIssues = await github.listOpenIssues(owner, repo);
 
-        const scoredIssues = filterAndScoreIssues(allIssues, {
+        // Fetch dependency info for all issues
+        const dependencies = new Map<number, number | null>();
+        for (const issue of allIssues) {
+          const parent = await github.getIssueParent(owner, repo, issue.number);
+          if (parent && parent.state === 'open') {
+            dependencies.set(issue.number, parent.number);
+          }
+        }
+
+        // Score with dependencies
+        const filteredIssues = applyFilters(allIssues, {
           includeTypes: args.includeTypes,
           excludeTypes: args.excludeTypes,
         });
+        const scoredIssues = scoreIssuesWithDependencies(filteredIssues, dependencies);
+        scoredIssues.sort((a, b) => comparePriorityScores(a.score, b.score));
 
         const allLocks = await locking.listLocks();
         const lockedIssueNumbers = new Set(
@@ -86,22 +102,25 @@ export function registerListBacklogTool(server: McpServer) {
             .map((l) => [l.issueNumber, l.lock.sessionId])
         );
 
-        const backlog = scoredIssues.slice(0, limit).map(({ issue, score, ageInDays }) => {
-          const priorityLabel = getPriorityLabel(issue);
-          const typeLabel = getTypeLabel(issue);
-          const isLocked = lockedIssueNumbers.has(issue.number);
+        const backlog = scoredIssues
+          .slice(0, limit)
+          .map(({ issue, score, ageInDays, blockedByIssue }) => {
+            const priorityLabel = getPriorityLabel(issue);
+            const typeLabel = getTypeLabel(issue);
+            const isLocked = lockedIssueNumbers.has(issue.number);
 
-          return {
-            number: issue.number,
-            title: issue.title,
-            priority: priorityLabel?.replace('priority:', '') ?? null,
-            type: typeLabel?.replace('type:', '') ?? null,
-            priorityScore: score.totalScore,
-            ageInDays,
-            isLocked,
-            lockedBy: isLocked ? lockHolders.get(issue.number) ?? null : null,
-          };
-        });
+            return {
+              number: issue.number,
+              title: issue.title,
+              priority: priorityLabel?.replace('priority:', '') ?? null,
+              type: typeLabel?.replace('type:', '') ?? null,
+              priorityScore: score.totalScore,
+              ageInDays,
+              isLocked,
+              lockedBy: isLocked ? lockHolders.get(issue.number) ?? null : null,
+              blockedBy: blockedByIssue ?? null,
+            };
+          });
 
         const duration = Date.now() - startTime;
         await logger.info('list_backlog', {

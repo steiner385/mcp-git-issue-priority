@@ -1,10 +1,15 @@
 import { Octokit } from '@octokit/rest';
 import { throttling } from '@octokit/plugin-throttling';
 import { retry } from '@octokit/plugin-retry';
-import type { Issue, Label, IssuePriority, IssueType } from '../models/index.js';
+import type { Issue, Label, IssuePriority, IssueType, PrStatus, CheckStatus } from '../models/index.js';
 import { LABEL_DEFINITIONS } from '../models/index.js';
 
 const ThrottledOctokit = Octokit.plugin(throttling, retry);
+
+export interface IssueParent {
+  number: number;
+  state: 'open' | 'closed';
+}
 
 export interface CreateIssueParams {
   owner: string;
@@ -219,6 +224,20 @@ export class GitHubService {
     });
   }
 
+  async updateIssueState(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+    state: 'open' | 'closed'
+  ): Promise<void> {
+    await this.octokit.issues.update({
+      owner,
+      repo,
+      issue_number: issueNumber,
+      state,
+    });
+  }
+
   async verifyRepoAccess(owner: string, repo: string): Promise<boolean> {
     try {
       const response = await this.octokit.repos.get({ owner, repo });
@@ -229,6 +248,121 @@ export class GitHubService {
       }
       throw error;
     }
+  }
+
+  async getIssueParent(
+    owner: string,
+    repo: string,
+    issueNumber: number
+  ): Promise<IssueParent | null> {
+    try {
+      const response = await this.octokit.request(
+        'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
+        { owner, repo, issue_number: issueNumber }
+      );
+
+      // The sub_issues endpoint returns an object with a parent property, not an array
+      const data = response.data as unknown as { parent?: { number: number; state: string } };
+      if (data.parent) {
+        return {
+          number: data.parent.number,
+          state: data.parent.state as 'open' | 'closed',
+        };
+      }
+      return null;
+    } catch {
+      // Graceful degradation - sub-issues API may not be available
+      return null;
+    }
+  }
+
+  async getPrStatus(owner: string, repo: string, prNumber: number): Promise<PrStatus> {
+    const prResponse = await this.octokit.pulls.get({
+      owner,
+      repo,
+      pull_number: prNumber,
+    });
+
+    const pr = prResponse.data;
+    const sha = pr.head.sha;
+
+    // Determine PR state
+    let state: 'open' | 'closed' | 'merged' = pr.state as 'open' | 'closed';
+    if (pr.state === 'closed' && pr.merged) {
+      state = 'merged';
+    }
+
+    // Get CI checks
+    const checksResponse = await this.octokit.checks.listForRef({
+      owner,
+      repo,
+      ref: sha,
+    });
+
+    const checks: CheckStatus[] = checksResponse.data.check_runs.map((run) => ({
+      name: run.name,
+      status: this.mapCheckConclusion(run.conclusion),
+    }));
+
+    const ciStatus = this.calculateCiStatus(checks);
+
+    // Get reviews
+    const reviewsResponse = await this.octokit.request(
+      'GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews',
+      { owner, repo, pull_number: prNumber }
+    );
+
+    const reviews = reviewsResponse.data;
+    const approved = reviews.some((r: any) => r.state === 'APPROVED');
+    const changesRequested = reviews.some((r: any) => r.state === 'CHANGES_REQUESTED');
+    const reviewers = [...new Set(reviews.map((r: any) => r.user?.login).filter(Boolean))];
+
+    return {
+      prNumber,
+      state,
+      mergeable: pr.mergeable,
+      ci: {
+        status: ciStatus,
+        checks,
+      },
+      reviews: {
+        approved,
+        changesRequested,
+        reviewers: reviewers as string[],
+      },
+      autoMerge: {
+        enabled: pr.auto_merge !== null,
+      },
+    };
+  }
+
+  private mapCheckConclusion(conclusion: string | null): CheckStatus['status'] {
+    switch (conclusion) {
+      case 'success':
+        return 'success';
+      case 'failure':
+      case 'timed_out':
+      case 'cancelled':
+        return 'failure';
+      case 'neutral':
+        return 'neutral';
+      case 'skipped':
+        return 'skipped';
+      default:
+        return 'in_progress';
+    }
+  }
+
+  private calculateCiStatus(checks: CheckStatus[]): 'pending' | 'passing' | 'failing' | 'none' {
+    if (checks.length === 0) return 'none';
+
+    const hasFailure = checks.some((c) => c.status === 'failure');
+    if (hasFailure) return 'failing';
+
+    const hasPending = checks.some((c) => c.status === 'in_progress' || c.status === 'queued');
+    if (hasPending) return 'pending';
+
+    return 'passing';
   }
 
   private mapApiIssue(

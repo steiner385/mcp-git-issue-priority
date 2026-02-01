@@ -132,7 +132,7 @@ Add to `~/.claude.json` (global) or `.claude/settings.json` (project):
 After restarting Claude Code:
 
 1. Run `/mcp` to see available MCP servers
-2. The `github-issue-priority` server should be listed with 8 tools
+2. The `github-issue-priority` server should be listed with 13 tools
 3. Try `list_backlog` on any repository to confirm it's working
 
 ## Available Tools
@@ -238,18 +238,79 @@ In **update mode**, applies default labels to issues:
 - Missing type → `type:feature` (or specified default)
 - Missing status → `status:backlog`
 
+### `get_pr_status`
+
+Check CI status, approval state, and merge state of a pull request.
+
+```
+Arguments:
+  - repository (required): "owner/repo" format
+  - prNumber (required): Pull request number to check
+```
+
+### `bulk_update_issues`
+
+Add/remove labels and close/reopen multiple issues at once.
+
+```
+Arguments:
+  - repository (required): "owner/repo" format
+  - issues (required): Array of issue numbers (1-50)
+  - addLabels (optional): Labels to add
+  - removeLabels (optional): Labels to remove
+  - state (optional): "open" | "closed"
+```
+
+### `implement_batch`
+
+Start implementing a batch of N issues in priority order. Returns the first issue to implement.
+
+```
+Arguments:
+  - repository (required): "owner/repo" format
+  - count (required): Number of issues to implement (1-10)
+  - includeTypes (optional): Only include these issue types
+  - excludeTypes (optional): Exclude these issue types
+  - maxPriority (optional): Only P0, P1, etc.
+```
+
+### `batch_continue`
+
+Continue batch implementation. Polls for PR merge, then returns next issue or completion.
+
+```
+Arguments:
+  - batchId (required): Batch ID from implement_batch
+  - prNumber (optional): PR number for current issue
+```
+
+### `get_workflow_analytics`
+
+Get time-based workflow analytics: cycle time, phase breakdown, aging reports.
+
+```
+Arguments:
+  - repository (required): "owner/repo" format
+  - period (optional): "7d" | "30d" | "90d" | "all" (default: 30d)
+```
+
 ## Priority Scoring Algorithm
 
 Issues are scored using a deterministic formula:
 
 ```
-score = (basePoints + ageBonus) * blockingMultiplier
+score = (basePoints + ageBonus) * blockingMultiplier * blockedPenalty
 ```
 
 - **Base Points**: P0=1000, P1=100, P2=10, P3=1
 - **Age Bonus**: +1 point per day since creation (max 365)
 - **Blocking Multiplier**: 1.5x for issues with "blocking" label
+- **Blocked Penalty**: 0.1x for issues blocked by open parent issues (via GitHub sub-issues)
 - **Tiebreaker**: Earlier creation date wins (FIFO)
+
+### Dependency Detection
+
+Issues with open parent issues (using GitHub's sub-issues feature) are automatically deprioritized with a 0.1x penalty. This ensures that blocked work sinks to the bottom of the backlog until its dependencies are resolved. Once a parent issue is closed, the child issue's priority returns to normal.
 
 ## Workflow Phases
 

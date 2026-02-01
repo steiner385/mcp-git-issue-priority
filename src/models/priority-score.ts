@@ -7,6 +7,8 @@ export const PriorityScoreSchema = z.object({
   basePoints: z.number().int().nonnegative(),
   ageBonus: z.number().int().nonnegative(),
   blockingMultiplier: z.number().positive(),
+  blockedPenalty: z.number().positive(),
+  blockedByIssue: z.number().int().positive().nullable(),
   totalScore: z.number().nonnegative(),
 });
 
@@ -21,6 +23,7 @@ export const PRIORITY_BASE_POINTS: Record<PriorityLabel, number> = {
 
 export const MAX_AGE_BONUS = 30;
 export const BLOCKING_MULTIPLIER = 1.5;
+export const BLOCKED_PENALTY = 0.1;
 
 export function calculateAgeInDays(createdAt: string): number {
   const created = new Date(createdAt);
@@ -33,7 +36,14 @@ export function hasBlockingRelationship(issue: Issue): boolean {
   return hasLabel(issue, 'blocking') || hasLabel(issue, 'blocker');
 }
 
-export function calculatePriorityScore(issue: Issue): PriorityScore {
+export interface PriorityScoreOptions {
+  blockedByIssue?: number | null;
+}
+
+export function calculatePriorityScore(
+  issue: Issue,
+  options?: PriorityScoreOptions
+): PriorityScore {
   const priorityLabel = getPriorityLabel(issue);
   const basePoints = priorityLabel ? PRIORITY_BASE_POINTS[priorityLabel] : 0;
 
@@ -43,13 +53,18 @@ export function calculatePriorityScore(issue: Issue): PriorityScore {
   const blocksOthers = hasBlockingRelationship(issue);
   const blockingMultiplier = blocksOthers ? BLOCKING_MULTIPLIER : 1.0;
 
-  const totalScore = (basePoints + ageBonus) * blockingMultiplier;
+  const blockedByIssue = options?.blockedByIssue ?? null;
+  const blockedPenalty = blockedByIssue ? BLOCKED_PENALTY : 1.0;
+
+  const totalScore = (basePoints + ageBonus) * blockingMultiplier * blockedPenalty;
 
   return {
     issueNumber: issue.number,
     basePoints,
     ageBonus,
     blockingMultiplier,
+    blockedPenalty,
+    blockedByIssue,
     totalScore,
   };
 }

@@ -7,6 +7,7 @@ import {
   PRIORITY_BASE_POINTS,
   MAX_AGE_BONUS,
   BLOCKING_MULTIPLIER,
+  BLOCKED_PENALTY,
 } from '../../src/models/priority-score.js';
 import type { Issue } from '../../src/models/issue.js';
 
@@ -126,6 +127,35 @@ describe('Priority Score Calculation', () => {
 
       expect(score.basePoints).toBe(0);
       expect(score.totalScore).toBe(14);
+    });
+  });
+
+  describe('blocked penalty', () => {
+    it('applies 0.1x penalty when blockedByIssue is provided', () => {
+      const issue = createMockIssue(1, ['priority:high']);
+      const score = calculatePriorityScore(issue, { blockedByIssue: 42 });
+
+      expect(score.blockedPenalty).toBe(BLOCKED_PENALTY);
+      expect(score.blockedByIssue).toBe(42);
+      expect(score.totalScore).toBe((100 + 14) * 1.0 * 0.1); // 11.4
+    });
+
+    it('applies 1.0x penalty when not blocked', () => {
+      const issue = createMockIssue(1, ['priority:high']);
+      const score = calculatePriorityScore(issue);
+
+      expect(score.blockedPenalty).toBe(1.0);
+      expect(score.blockedByIssue).toBeNull();
+      expect(score.totalScore).toBe(114);
+    });
+
+    it('combines blocking multiplier and blocked penalty', () => {
+      const issue = createMockIssue(1, ['priority:high', 'blocking']);
+      const score = calculatePriorityScore(issue, { blockedByIssue: 42 });
+
+      expect(score.blockingMultiplier).toBe(1.5);
+      expect(score.blockedPenalty).toBe(BLOCKED_PENALTY);
+      expect(score.totalScore).toBe((100 + 14) * 1.5 * 0.1); // 17.1
     });
   });
 

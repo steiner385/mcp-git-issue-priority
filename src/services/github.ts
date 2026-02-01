@@ -224,6 +224,20 @@ export class GitHubService {
     });
   }
 
+  async updateIssueState(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+    state: 'open' | 'closed'
+  ): Promise<void> {
+    await this.octokit.issues.update({
+      owner,
+      repo,
+      issue_number: issueNumber,
+      state,
+    });
+  }
+
   async verifyRepoAccess(owner: string, repo: string): Promise<boolean> {
     try {
       const response = await this.octokit.repos.get({ owner, repo });

@@ -15,6 +15,7 @@ import { registerGetWorkflowStatusTool } from './tools/get-workflow-status.js';
 import { registerListBacklogTool } from './tools/list-backlog.js';
 import { registerSyncBacklogLabelsTool } from './tools/sync-backlog-labels.js';
 import { registerGetPrStatusTool } from './tools/get-pr-status.js';
+import { registerBulkUpdateIssuesTool } from './tools/bulk-update-issues.js';
 
 async function main() {
   try {
@@ -40,6 +41,7 @@ async function main() {
     registerListBacklogTool(server);
     registerSyncBacklogLabelsTool(server);
     registerGetPrStatusTool(server);
+    registerBulkUpdateIssuesTool(server);
 
     const transport = new StdioServerTransport();
     await server.connect(transport);

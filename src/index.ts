@@ -14,6 +14,7 @@ import { registerForceClaimTool } from './tools/force-claim.js';
 import { registerGetWorkflowStatusTool } from './tools/get-workflow-status.js';
 import { registerListBacklogTool } from './tools/list-backlog.js';
 import { registerSyncBacklogLabelsTool } from './tools/sync-backlog-labels.js';
+import { registerGetPrStatusTool } from './tools/get-pr-status.js';
 
 async function main() {
   try {
@@ -38,6 +39,7 @@ async function main() {
     registerGetWorkflowStatusTool(server);
     registerListBacklogTool(server);
     registerSyncBacklogLabelsTool(server);
+    registerGetPrStatusTool(server);
 
     const transport = new StdioServerTransport();
     await server.connect(transport);

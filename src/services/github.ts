@@ -247,10 +247,12 @@ export class GitHubService {
         { owner, repo, issue_number: issueNumber }
       );
 
-      if (response.data.parent) {
+      // The sub_issues endpoint returns an object with a parent property, not an array
+      const data = response.data as unknown as { parent?: { number: number; state: string } };
+      if (data.parent) {
         return {
-          number: response.data.parent.number,
-          state: response.data.parent.state as 'open' | 'closed',
+          number: data.parent.number,
+          state: data.parent.state as 'open' | 'closed',
         };
       }
       return null;

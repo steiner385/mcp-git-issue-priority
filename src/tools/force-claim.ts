@@ -4,13 +4,7 @@ import { getGitHubService } from '../services/github.js';
 import { getLockingService } from '../services/locking.js';
 import { getWorkflowService } from '../services/workflow.js';
 import { getLogger } from '../services/logging.js';
-
-function parseRepository(repository?: string): { owner: string; repo: string } | null {
-  if (!repository) return null;
-  const [owner, repo] = repository.split('/');
-  if (!owner || !repo) return null;
-  return { owner, repo };
-}
+import { resolveRepository } from '../utils/repository.js';
 
 const CONFIRMATION_STRING = 'I understand this may cause conflicts';
 
@@ -41,10 +35,10 @@ export function registerForceClaimTool(server: McpServer) {
         };
       }
 
-      const parsed = parseRepository(args.repository);
+      const parsed = resolveRepository(args.repository);
       if (!parsed) {
         return {
-          content: [{ type: 'text', text: JSON.stringify({ success: false, error: 'Repository is required', code: 'REPO_REQUIRED' }) }],
+          content: [{ type: 'text', text: JSON.stringify({ success: false, error: "Repository required. Provide 'repository' argument or set GITHUB_REPOSITORY env var.", code: 'REPO_REQUIRED' }) }],
           isError: true,
         };
       }

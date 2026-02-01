@@ -9,13 +9,7 @@ import {
   applyFilters,
 } from '../services/priority.js';
 import { getTypeLabel, getPriorityLabel } from '../models/index.js';
-
-function parseRepository(repository?: string): { owner: string; repo: string } | null {
-  if (!repository) return null;
-  const [owner, repo] = repository.split('/');
-  if (!owner || !repo) return null;
-  return { owner, repo };
-}
+import { resolveRepository } from '../utils/repository.js';
 
 export function registerListBacklogTool(server: McpServer) {
   server.tool(
@@ -49,7 +43,7 @@ export function registerListBacklogTool(server: McpServer) {
       const github = getGitHubService();
       const locking = getLockingService();
 
-      const parsed = parseRepository(args.repository);
+      const parsed = resolveRepository(args.repository);
       if (!parsed) {
         return {
           content: [
@@ -57,7 +51,7 @@ export function registerListBacklogTool(server: McpServer) {
               type: 'text',
               text: JSON.stringify({
                 success: false,
-                error: 'Repository is required',
+                error: "Repository required. Provide 'repository' argument or set GITHUB_REPOSITORY env var.",
                 code: 'REPO_REQUIRED',
               }),
             },

@@ -10,6 +10,7 @@ export interface Config {
   logsDir: string;
   githubToken: string;
   sessionId: string;
+  defaultRepository?: { owner: string; repo: string };
 }
 
 const BASE_DIR_NAME = '.mcp-git-issue-priority';
@@ -46,6 +47,30 @@ export function generateSessionId(): string {
 }
 
 /**
+ * Parses default repository from environment variables.
+ * Priority: GITHUB_REPOSITORY > GITHUB_OWNER+GITHUB_REPO
+ */
+function getDefaultRepository(): { owner: string; repo: string } | undefined {
+  // Try GITHUB_REPOSITORY first (owner/repo format)
+  const ghRepo = process.env.GITHUB_REPOSITORY;
+  if (ghRepo) {
+    const [owner, repo] = ghRepo.split('/');
+    if (owner && repo) {
+      return { owner, repo };
+    }
+  }
+
+  // Fall back to GITHUB_OWNER + GITHUB_REPO (both must be set)
+  const owner = process.env.GITHUB_OWNER;
+  const repo = process.env.GITHUB_REPO;
+  if (owner && repo) {
+    return { owner, repo };
+  }
+
+  return undefined;
+}
+
+/**
  * Attempts to get a GitHub token from the GitHub CLI (`gh auth token`).
  * Returns null if gh is not installed or not authenticated.
  */
@@ -79,6 +104,7 @@ export function createConfig(githubToken?: string): Config {
     logsDir: getLogsDir(),
     githubToken: token,
     sessionId: generateSessionId(),
+    defaultRepository: getDefaultRepository(),
   };
 }
 

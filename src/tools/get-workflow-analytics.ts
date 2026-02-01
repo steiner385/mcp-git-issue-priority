@@ -3,13 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getWorkflowService } from '../services/workflow.js';
 import { getLogger } from '../services/logging.js';
 import { type WorkflowState, type WorkflowPhase, PHASE_ORDER } from '../models/workflow-state.js';
-
-function parseRepository(repository?: string): { owner: string; repo: string } | null {
-  if (!repository) return null;
-  const [owner, repo] = repository.split('/');
-  if (!owner || !repo) return null;
-  return { owner, repo };
-}
+import { resolveRepository } from '../utils/repository.js';
 
 function formatDuration(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -164,7 +158,7 @@ export function registerGetWorkflowAnalyticsTool(server: McpServer) {
       const logger = getLogger();
       const workflow = getWorkflowService();
 
-      const parsed = parseRepository(args.repository);
+      const parsed = resolveRepository(args.repository);
       if (!parsed) {
         return {
           content: [
@@ -172,7 +166,7 @@ export function registerGetWorkflowAnalyticsTool(server: McpServer) {
               type: 'text',
               text: JSON.stringify({
                 success: false,
-                error: 'Repository is required in owner/repo format',
+                error: "Repository required. Provide 'repository' argument or set GITHUB_REPOSITORY env var.",
                 code: 'REPO_REQUIRED',
               }),
             },

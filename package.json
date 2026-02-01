@@ -7,6 +7,23 @@
   "bin": {
     "mcp-git-issue-priority": "dist/index.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/steiner385/mcp-git-issue-priority.git"
+  },
+  "homepage": "https://github.com/steiner385/mcp-git-issue-priority#readme",
+  "bugs": {
+    "url": "https://github.com/steiner385/mcp-git-issue-priority/issues"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",

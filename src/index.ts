@@ -18,6 +18,7 @@ import { registerGetPrStatusTool } from './tools/get-pr-status.js';
 import { registerBulkUpdateIssuesTool } from './tools/bulk-update-issues.js';
 import { registerImplementBatchTool } from './tools/implement-batch.js';
 import { registerBatchContinueTool } from './tools/batch-continue.js';
+import { registerGetWorkflowAnalyticsTool } from './tools/get-workflow-analytics.js';
 
 async function main() {
   try {
@@ -46,6 +47,7 @@ async function main() {
     registerBulkUpdateIssuesTool(server);
     registerImplementBatchTool(server);
     registerBatchContinueTool(server);
+    registerGetWorkflowAnalyticsTool(server);
 
     const transport = new StdioServerTransport();
     await server.connect(transport);

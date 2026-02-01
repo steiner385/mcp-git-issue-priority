@@ -30,8 +30,12 @@ export function getLogsDir(): string {
   return join(getBaseDir(), 'logs');
 }
 
+export function getBatchesDir(): string {
+  return join(getBaseDir(), 'batches');
+}
+
 export async function ensureDirectories(): Promise<void> {
-  const dirs = [getBaseDir(), getLocksDir(), getWorkflowDir(), getLogsDir()];
+  const dirs = [getBaseDir(), getLocksDir(), getWorkflowDir(), getLogsDir(), getBatchesDir()];
   for (const dir of dirs) {
     await mkdir(dir, { recursive: true });
   }

@@ -16,6 +16,7 @@ import { registerListBacklogTool } from './tools/list-backlog.js';
 import { registerSyncBacklogLabelsTool } from './tools/sync-backlog-labels.js';
 import { registerGetPrStatusTool } from './tools/get-pr-status.js';
 import { registerBulkUpdateIssuesTool } from './tools/bulk-update-issues.js';
+import { registerImplementBatchTool } from './tools/implement-batch.js';
 
 async function main() {
   try {
@@ -42,6 +43,7 @@ async function main() {
     registerSyncBacklogLabelsTool(server);
     registerGetPrStatusTool(server);
     registerBulkUpdateIssuesTool(server);
+    registerImplementBatchTool(server);
 
     const transport = new StdioServerTransport();
     await server.connect(transport);

@@ -6,6 +6,11 @@ import { LABEL_DEFINITIONS } from '../models/index.js';
 
 const ThrottledOctokit = Octokit.plugin(throttling, retry);
 
+export interface IssueParent {
+  number: number;
+  state: 'open' | 'closed';
+}
+
 export interface CreateIssueParams {
   owner: string;
   repo: string;
@@ -228,6 +233,30 @@ export class GitHubService {
         return false;
       }
       throw error;
+    }
+  }
+
+  async getIssueParent(
+    owner: string,
+    repo: string,
+    issueNumber: number
+  ): Promise<IssueParent | null> {
+    try {
+      const response = await this.octokit.request(
+        'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
+        { owner, repo, issue_number: issueNumber }
+      );
+
+      if (response.data.parent) {
+        return {
+          number: response.data.parent.number,
+          state: response.data.parent.state as 'open' | 'closed',
+        };
+      }
+      return null;
+    } catch {
+      // Graceful degradation - sub-issues API may not be available
+      return null;
     }
   }
 

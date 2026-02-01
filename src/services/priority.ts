@@ -13,6 +13,12 @@ export interface ScoredIssue {
   issue: Issue;
   score: PriorityScore;
   ageInDays: number;
+  blockedByIssue?: number | null;
+}
+
+export interface DependencyInfo {
+  issueNumber: number;
+  blockedByIssue: number | null;
 }
 
 export function scoreIssues(issues: Issue[]): ScoredIssue[] {
@@ -21,6 +27,21 @@ export function scoreIssues(issues: Issue[]): ScoredIssue[] {
     score: calculatePriorityScore(issue),
     ageInDays: calculateAgeInDays(issue.created_at),
   }));
+}
+
+export function scoreIssuesWithDependencies(
+  issues: Issue[],
+  dependencies: Map<number, number | null>
+): ScoredIssue[] {
+  return issues.map((issue) => {
+    const blockedByIssue = dependencies.get(issue.number) ?? null;
+    return {
+      issue,
+      score: calculatePriorityScore(issue, { blockedByIssue }),
+      ageInDays: calculateAgeInDays(issue.created_at),
+      blockedByIssue,
+    };
+  });
 }
 
 export function filterAndScoreIssues(issues: Issue[], filter: SelectionFilter): ScoredIssue[] {

@@ -32,3 +32,6 @@ tmp/
 
 # Lock file backups
 *.lock.bak
+
+# Git worktrees
+.worktrees/

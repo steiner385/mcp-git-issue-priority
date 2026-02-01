@@ -2,13 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getGitHubService } from '../services/github.js';
 import { getLogger } from '../services/logging.js';
-
-function parseRepository(repository?: string): { owner: string; repo: string } | null {
-  if (!repository) return null;
-  const [owner, repo] = repository.split('/');
-  if (!owner || !repo) return null;
-  return { owner, repo };
-}
+import { resolveRepository } from '../utils/repository.js';
 
 interface LabelIssue {
   number: number;
@@ -47,10 +41,10 @@ export function registerSyncBacklogLabelsTool(server: McpServer) {
       const logger = getLogger();
       const github = getGitHubService();
 
-      const parsed = parseRepository(args.repository);
+      const parsed = resolveRepository(args.repository);
       if (!parsed) {
         return {
-          content: [{ type: 'text', text: JSON.stringify({ success: false, error: 'Invalid repository format', code: 'INVALID_REPO' }) }],
+          content: [{ type: 'text', text: JSON.stringify({ success: false, error: "Repository required. Provide 'repository' argument or set GITHUB_REPOSITORY env var.", code: 'REPO_REQUIRED' }) }],
           isError: true,
         };
       }

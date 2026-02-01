@@ -3,12 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getGitHubService } from '../services/github.js';
 import { getBatchService } from '../services/batch.js';
 import { getLogger } from '../services/logging.js';
-
-function parseRepository(repository: string): { owner: string; repo: string } | null {
-  const [owner, repo] = repository.split('/');
-  if (!owner || !repo) return null;
-  return { owner, repo };
-}
+import { resolveRepository } from '../utils/repository.js';
 
 const POLL_INTERVAL_MS = 60_000; // 60 seconds
 const MAX_POLL_DURATION_MS = 30 * 60_000; // 30 minutes
@@ -38,10 +33,10 @@ export function registerBatchContinueTool(server: McpServer) {
         };
       }
 
-      const parsed = parseRepository(batch.repository);
+      const parsed = resolveRepository(batch.repository);
       if (!parsed) {
         return {
-          content: [{ type: 'text', text: JSON.stringify({ success: false, error: 'Invalid repository' }) }],
+          content: [{ type: 'text', text: JSON.stringify({ success: false, error: 'Invalid repository in batch record' }) }],
           isError: true,
         };
       }

@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getGitHubService } from '../services/github.js';
 import { getLogger } from '../services/logging.js';
 import { IssuePrioritySchema, IssueTypeSchema } from '../models/index.js';
+import { resolveRepository } from '../utils/repository.js';
 
 export const CreateIssueInputSchema = z.object({
   title: z.string().min(1).max(256).describe('Issue title'),
@@ -62,13 +63,6 @@ export function formatIssueBody(options: FormatIssueBodyOptions): string {
   return sections.join('\n');
 }
 
-function parseRepository(repository?: string): { owner: string; repo: string } | null {
-  if (!repository) return null;
-  const [owner, repo] = repository.split('/');
-  if (!owner || !repo) return null;
-  return { owner, repo };
-}
-
 export function registerCreateIssueTool(server: McpServer) {
   server.tool(
     'create_issue',
@@ -92,23 +86,7 @@ export function registerCreateIssueTool(server: McpServer) {
       const logger = getLogger();
       const github = getGitHubService();
 
-      const parsed = parseRepository(args.repository);
-      if (!parsed && !args.repository) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({
-                success: false,
-                error: 'Repository is required',
-                code: 'REPO_REQUIRED',
-              }),
-            },
-          ],
-          isError: true,
-        };
-      }
-
+      const parsed = resolveRepository(args.repository);
       if (!parsed) {
         return {
           content: [
@@ -116,8 +94,8 @@ export function registerCreateIssueTool(server: McpServer) {
               type: 'text',
               text: JSON.stringify({
                 success: false,
-                error: 'Invalid repository format. Use owner/repo',
-                code: 'INVALID_REPO_FORMAT',
+                error: "Repository required. Provide 'repository' argument or set GITHUB_REPOSITORY env var.",
+                code: 'REPO_REQUIRED',
               }),
             },
           ],

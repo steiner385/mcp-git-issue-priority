@@ -4,12 +4,7 @@ import { getGitHubService } from '../services/github.js';
 import { getBatchService } from '../services/batch.js';
 import { getLogger } from '../services/logging.js';
 import { filterAndScoreIssues } from '../services/priority.js';
-
-function parseRepository(repository: string): { owner: string; repo: string } | null {
-  const [owner, repo] = repository.split('/');
-  if (!owner || !repo) return null;
-  return { owner, repo };
-}
+import { resolveRepository } from '../utils/repository.js';
 
 export function registerImplementBatchTool(server: McpServer) {
   server.tool(
@@ -19,7 +14,8 @@ export function registerImplementBatchTool(server: McpServer) {
       repository: z
         .string()
         .regex(/^[^/]+\/[^/]+$/)
-        .describe("Repository in 'owner/repo' format"),
+        .optional()
+        .describe("Repository in 'owner/repo' format. Optional if GITHUB_REPOSITORY env var is set."),
       count: z
         .number()
         .int()
@@ -45,10 +41,10 @@ export function registerImplementBatchTool(server: McpServer) {
       const github = getGitHubService();
       const batchService = getBatchService();
 
-      const parsed = parseRepository(args.repository);
+      const parsed = resolveRepository(args.repository);
       if (!parsed) {
         return {
-          content: [{ type: 'text', text: JSON.stringify({ success: false, error: 'Invalid repository format' }) }],
+          content: [{ type: 'text', text: JSON.stringify({ success: false, error: "Repository required. Provide 'repository' argument or set GITHUB_REPOSITORY env var." }) }],
           isError: true,
         };
       }
@@ -88,7 +84,8 @@ export function registerImplementBatchTool(server: McpServer) {
 
         // Create batch with top N issues
         const issueNumbers = eligibleIssues.slice(0, args.count).map((s) => s.issue.number);
-        const batch = await batchService.createBatch(args.repository, issueNumbers);
+        const repoFullName = `${owner}/${repo}`;
+        const batch = await batchService.createBatch(repoFullName, issueNumbers);
 
         // Start first issue
         const firstIssueNumber = await batchService.startNextIssue(batch.batchId);

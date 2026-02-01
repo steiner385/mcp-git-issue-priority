@@ -15,6 +15,10 @@
   "bugs": {
     "url": "https://github.com/steiner385/mcp-git-issue-priority/issues"
   },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/steiner385"
+  },
   "files": [
     "dist",
     "README.md",

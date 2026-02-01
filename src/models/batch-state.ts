@@ -12,7 +12,7 @@ export type CompletedIssue = z.infer<typeof CompletedIssueSchema>;
 export const BatchStateSchema = z.object({
   batchId: z.string().uuid(),
   repository: z.string(),
-  totalCount: z.number().int().positive(),
+  totalCount: z.number().int().nonnegative(),
   completedCount: z.number().int().nonnegative(),
   currentIssue: z.number().int().positive().nullable(),
   currentPr: z.number().int().positive().nullable(),

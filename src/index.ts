@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { exec } from 'child_process';
+import { platform } from 'os';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createConfig, ensureDirectories, setConfig } from './config/index.js';
@@ -20,7 +22,56 @@ import { registerImplementBatchTool } from './tools/implement-batch.js';
 import { registerBatchContinueTool } from './tools/batch-continue.js';
 import { registerGetWorkflowAnalyticsTool } from './tools/get-workflow-analytics.js';
 
+const REPO_URL = 'https://github.com/steiner385/mcp-git-issue-priority';
+const VERSION = '1.1.0';
+
+function openUrl(url: string): void {
+  const plat = platform();
+  const cmd =
+    plat === 'darwin' ? 'open' : plat === 'win32' ? 'start' : 'xdg-open';
+  exec(`${cmd} "${url}"`);
+}
+
+function handleCliArgs(): boolean {
+  const args = process.argv.slice(2);
+
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(`
+mcp-git-issue-priority v${VERSION}
+
+MCP server for GitHub issue prioritization and workflow management.
+
+Usage:
+  mcp-git-issue-priority          Start the MCP server (for MCP hosts)
+  mcp-git-issue-priority --help   Show this help message
+  mcp-git-issue-priority --version  Show version
+  mcp-git-issue-priority --feedback Open the feedback/issues page
+
+Documentation: ${REPO_URL}#readme
+`);
+    return true;
+  }
+
+  if (args.includes('--version') || args.includes('-v')) {
+    console.log(VERSION);
+    return true;
+  }
+
+  if (args.includes('--feedback')) {
+    console.log('Opening feedback page...');
+    openUrl(`${REPO_URL}/issues`);
+    return true;
+  }
+
+  return false;
+}
+
 async function main() {
+  // Handle CLI arguments before starting server
+  if (handleCliArgs()) {
+    process.exit(0);
+  }
+
   try {
     const config = createConfig();
     setConfig(config);

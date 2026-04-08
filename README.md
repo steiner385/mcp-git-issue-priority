@@ -406,7 +406,13 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-## Support
+## Feedback & Support
 
-- [Open an issue](https://github.com/steiner385/mcp-git-issue-priority/issues) for bug reports or feature requests
-- Check existing issues before creating new ones
+We'd love to hear from you! Your feedback helps improve this tool for everyone.
+
+- **Questions or ideas?** Start a [Discussion](https://github.com/steiner385/mcp-git-issue-priority/discussions)
+- **Found a bug?** [Open an issue](https://github.com/steiner385/mcp-git-issue-priority/issues)
+- **Feature request?** [Open an issue](https://github.com/steiner385/mcp-git-issue-priority/issues) with `[Feature]` in the title
+- **Quick feedback?** Run `mcp-git-issue-priority --feedback` to open the feedback page
+
+Check existing issues before creating new ones.

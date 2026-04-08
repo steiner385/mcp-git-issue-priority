@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 
 import { exec } from 'child_process';
+import { readFileSync } from 'fs';
 import { platform } from 'os';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createConfig, ensureDirectories, setConfig } from './config/index.js';
@@ -22,8 +25,11 @@ import { registerImplementBatchTool } from './tools/implement-batch.js';
 import { registerBatchContinueTool } from './tools/batch-continue.js';
 import { registerGetWorkflowAnalyticsTool } from './tools/get-workflow-analytics.js';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
+
 const REPO_URL = 'https://github.com/steiner385/mcp-git-issue-priority';
-const VERSION = '1.1.0';
+const VERSION = pkg.version;
 
 function openUrl(url: string): void {
   const plat = platform();

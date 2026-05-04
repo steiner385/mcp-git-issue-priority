@@ -13,6 +13,7 @@ import { initializeGitHubService } from './services/github.js';
 
 import { registerCreateIssueTool } from './tools/create-issue.js';
 import { registerSelectNextIssueTool } from './tools/select-next-issue.js';
+import { registerClaimIssueTool } from './tools/claim-issue.js';
 import { registerAdvanceWorkflowTool } from './tools/advance-workflow.js';
 import { registerReleaseLockTool } from './tools/release-lock.js';
 import { registerForceClaimTool } from './tools/force-claim.js';
@@ -94,6 +95,7 @@ async function main() {
 
     registerCreateIssueTool(server);
     registerSelectNextIssueTool(server);
+    registerClaimIssueTool(server);
     registerAdvanceWorkflowTool(server);
     registerReleaseLockTool(server);
     registerForceClaimTool(server);

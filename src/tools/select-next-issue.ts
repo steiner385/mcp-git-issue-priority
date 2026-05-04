@@ -60,6 +60,12 @@ export function registerSelectNextIssueTool(server: McpServer) {
       const repoFullName = `${owner}/${repo}`;
 
       try {
+        // Reap orphan locks from sessions that crashed without releasing.
+        // Without this, dead-process locks linger on disk and (visually, in
+        // list_locks output) suggest the backlog is more contended than it is.
+        // Cheap — bounded by the number of files in ~/.mcp-git-issue-priority/locks.
+        await locking.sweepStaleLocks();
+
         const allIssues = await github.listOpenIssues(owner, repo);
 
         // Fetch dependency info for all issues

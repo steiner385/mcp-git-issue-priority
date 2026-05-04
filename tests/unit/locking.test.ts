@@ -301,4 +301,75 @@ describe('LockingService', () => {
       expect(result.lock).toBeDefined();
     });
   });
+
+  describe('sweepStaleLocks', () => {
+    it('returns 0 when no locks exist', async () => {
+      const { testDir, sessionId } = await createTestEnv();
+      const lockingService = new LockingService(sessionId, testDir);
+
+      const swept = await lockingService.sweepStaleLocks();
+
+      expect(swept).toBe(0);
+    });
+
+    it('does not sweep fresh locks held by live processes', async () => {
+      const { testDir, sessionId } = await createTestEnv();
+      const lockingService = new LockingService(sessionId, testDir);
+
+      await lockingService.acquireLock('owner', 'repo', 100);
+      await lockingService.acquireLock('owner', 'repo', 101);
+
+      const swept = await lockingService.sweepStaleLocks();
+      const remaining = await lockingService.listLocks();
+
+      expect(swept).toBe(0);
+      expect(remaining.length).toBe(2);
+    });
+
+    it('removes locks belonging to dead processes', async () => {
+      const { testDir, sessionId } = await createTestEnv();
+      const lockingService = new LockingService(sessionId, testDir);
+
+      // Hand-write a lock file with a PID that does not exist
+      const deadPidLock = createLock(200, 'owner/repo', randomUUID(), 999999999);
+      const lockPath = join(testDir, getLockFileName('owner', 'repo', 200));
+      const { writeFile } = await import('fs/promises');
+      await writeFile(lockPath, JSON.stringify(deadPidLock, null, 2));
+
+      // And a normal live lock alongside it
+      await lockingService.acquireLock('owner', 'repo', 201);
+
+      const swept = await lockingService.sweepStaleLocks();
+      const remaining = await lockingService.listLocks();
+
+      expect(swept).toBe(1);
+      expect(remaining.length).toBe(1);
+      expect(remaining[0].issueNumber).toBe(201);
+    });
+
+    it('removes locks older than the stale-timeout regardless of PID liveness', async () => {
+      const { testDir, sessionId } = await createTestEnv();
+      const lockingService = new LockingService(sessionId, testDir);
+
+      // Hand-write a lock acquired 2 hours ago by THIS process (live PID)
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      const oldLock = {
+        issueNumber: 300,
+        repoFullName: 'owner/repo',
+        pid: process.pid,
+        sessionId: randomUUID(),
+        acquiredAt: twoHoursAgo,
+        lastUpdated: twoHoursAgo,
+      };
+      const lockPath = join(testDir, getLockFileName('owner', 'repo', 300));
+      const { writeFile } = await import('fs/promises');
+      await writeFile(lockPath, JSON.stringify(oldLock, null, 2));
+
+      const swept = await lockingService.sweepStaleLocks();
+      const remaining = await lockingService.listLocks();
+
+      expect(swept).toBe(1);
+      expect(remaining.length).toBe(0);
+    });
+  });
 });

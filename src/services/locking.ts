@@ -231,6 +231,27 @@ export class LockingService {
     const isStale = await this.isLockStale(lockData);
     return { sessionId: lockData.sessionId, isStale };
   }
+
+  /**
+   * Delete every lock file in the directory whose owner is stale (dead PID
+   * or older than LOCK_STALE_TIMEOUT_MS). Returns the number of files removed.
+   *
+   * Called opportunistically from entry points that already iterate locks
+   * (e.g. select_next_issue) so the directory does not accumulate orphans
+   * from sessions that crashed without releasing.
+   */
+  async sweepStaleLocks(): Promise<number> {
+    const all = await this.listLocks();
+    let swept = 0;
+    for (const info of all) {
+      if (!info.isStale) continue;
+      const [owner, repo] = info.lock.repoFullName.split('/');
+      if (!owner || !repo) continue;
+      await this.deleteLockFile(owner, repo, info.issueNumber);
+      swept += 1;
+    }
+    return swept;
+  }
 }
 
 let globalLockingService: LockingService | null = null;

@@ -88,6 +88,7 @@ export function registerAdvanceWorkflowTool(server: McpServer) {
           await workflow.updateBranchName(owner, repo, args.issueNumber, branchName);
         }
 
+        let lockReleasedOnPr = false;
         if (args.targetPhase === 'pr' && args.prTitle && args.prBody && branchName) {
           const pr = await github.createPullRequest(owner, repo, {
             title: args.prTitle,
@@ -98,6 +99,13 @@ export function registerAdvanceWorkflowTool(server: McpServer) {
           prUrl = pr.html_url;
           await workflow.updatePrNumber(owner, repo, args.issueNumber, prNumber);
           await github.updateIssueLabel(owner, repo, args.issueNumber, ['status:in-review'], ['status:in-progress']);
+
+          // Once the PR exists, the issue is signalled as claimed via
+          // `status:in-review` on GitHub. Drop the local filesystem lock so a
+          // session that crashes between `pr` and `merged` does not leave
+          // the issue indefinitely locked. Other sessions can still see the
+          // PR via the `in-review` label and the workflow state file.
+          lockReleasedOnPr = await locking.releaseLock(owner, repo, args.issueNumber);
         }
 
         const duration = Date.now() - startTime;
@@ -119,6 +127,7 @@ export function registerAdvanceWorkflowTool(server: McpServer) {
                 ...(branchName && { branchName }),
                 ...(prNumber && { prNumber }),
                 ...(prUrl && { prUrl }),
+                ...(lockReleasedOnPr && { lockReleased: true }),
               },
             }),
           }],

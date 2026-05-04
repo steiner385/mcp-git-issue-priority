@@ -34,9 +34,11 @@ describe('claim_issue handler', () => {
 
   // resolveRepository reads GITHUB_REPOSITORY through getConfig(), which caches
   // the value as a module-level singleton on first read. Reset the cache and
-  // re-set the env var per-test so mutations within a test don't leak.
+  // re-set the env vars per-test so mutations within a test don't leak.
+  // GITHUB_TOKEN is required for createConfig() to succeed in CI (no `gh` CLI).
   beforeEach(() => {
     process.env.GITHUB_REPOSITORY = 'tester/sample';
+    process.env.GITHUB_TOKEN = 'test-token';
     resetConfig();
   });
 

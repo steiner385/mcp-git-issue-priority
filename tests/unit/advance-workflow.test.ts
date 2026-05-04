@@ -66,8 +66,11 @@ describe('advance_workflow handler', () => {
     }
   });
 
+  // GITHUB_TOKEN is required for createConfig() to succeed when getConfig()
+  // lazily constructs a config in CI (no `gh` CLI to fall back on).
   beforeEach(() => {
     process.env.GITHUB_REPOSITORY = 'tester/sample';
+    process.env.GITHUB_TOKEN = 'test-token';
     resetConfig();
   });
 

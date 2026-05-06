@@ -15,7 +15,7 @@ export interface ReleaseLockArgs {
 export interface ReleaseLockDeps {
   github: Pick<GitHubService, 'updateIssueLabel' | 'closeIssue'>;
   locking: LockingService;
-  workflow: Pick<WorkflowService, 'deleteWorkflowState'>;
+  workflow: Pick<WorkflowService, 'deleteWorkflowState' | 'getWorkflowState'>;
   logger: Pick<AuditLogger, 'info' | 'error'>;
 }
 
@@ -66,13 +66,21 @@ export async function handleReleaseLock(
       };
     }
 
-    // Preserve workflow state for `completed` (PR open, awaiting merge) so
-    // that select_next_issue can filter on the durable phase and not
-    // re-select an issue that already has an open PR. Only wipe state on
-    // `abandoned` (work undone) and `merged` (issue is closed).
-    if (args.reason !== 'completed') {
+    // Preserve workflow state for `completed` (PR open, awaiting merge) and for
+    // any in-flight phase (pr/review/merged) even when abandoning — the PR may
+    // still exist on GitHub and another session could pick up the review.
+    // Only wipe state on `abandoned` when work is genuinely pre-PR, and on
+    // `merged` (issue is closed, no further selection needed).
+    const IN_FLIGHT_PHASES = new Set(['pr', 'review', 'merged']);
+    const currentState = await workflow.getWorkflowState(owner, repo, args.issueNumber);
+    const isInFlight = currentState && IN_FLIGHT_PHASES.has(currentState.currentPhase);
+
+    if (args.reason === 'merged') {
+      await workflow.deleteWorkflowState(owner, repo, args.issueNumber);
+    } else if (args.reason === 'abandoned' && !isInFlight) {
       await workflow.deleteWorkflowState(owner, repo, args.issueNumber);
     }
+    // reason === 'completed' or (reason === 'abandoned' && isInFlight) → preserve state
 
     if (args.reason === 'abandoned') {
       await github.updateIssueLabel(owner, repo, args.issueNumber, ['status:backlog'], ['status:in-progress', 'status:in-review']);

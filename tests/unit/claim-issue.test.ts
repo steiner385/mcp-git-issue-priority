@@ -4,6 +4,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { LockingService } from '../../src/services/locking.js';
+import { WorkflowService } from '../../src/services/workflow.js';
 import { handleClaimIssue, type ClaimIssueDeps } from '../../src/tools/claim-issue.js';
 import { getLockFileName } from '../../src/models/lock.js';
 import { resetConfig } from '../../src/config/index.js';
@@ -12,18 +13,22 @@ describe('claim_issue handler', () => {
   const testDirs: string[] = [];
 
   const createEnv = async () => {
-    const testDir = join(tmpdir(), `claim-issue-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    await mkdir(testDir, { recursive: true });
-    testDirs.push(testDir);
+    const baseDir = join(tmpdir(), `claim-issue-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const locksDir = join(baseDir, 'locks');
+    const workflowDir = join(baseDir, 'workflow');
+    await mkdir(locksDir, { recursive: true });
+    await mkdir(workflowDir, { recursive: true });
+    testDirs.push(baseDir);
     const sessionId = randomUUID();
-    const locking = new LockingService(sessionId, testDir);
+    const locking = new LockingService(sessionId, locksDir);
+    const workflow = new WorkflowService(sessionId, workflowDir);
     const logger = {
       info: vi.fn().mockResolvedValue(undefined),
       warn: vi.fn().mockResolvedValue(undefined),
       error: vi.fn().mockResolvedValue(undefined),
     };
-    const deps: ClaimIssueDeps = { locking, logger };
-    return { testDir, sessionId, locking, logger, deps };
+    const deps: ClaimIssueDeps = { locking, workflow, logger };
+    return { baseDir, locksDir, workflowDir, sessionId, locking, workflow, logger, deps };
   };
 
   afterAll(async () => {
@@ -83,7 +88,7 @@ describe('claim_issue handler', () => {
     });
 
     it('reports the count of stale locks swept before acquisition', async () => {
-      const { deps, locking, testDir } = await createEnv();
+      const { deps, locking, locksDir } = await createEnv();
 
       // Plant a stale lock (dead PID) for an unrelated issue
       const stale = {
@@ -95,7 +100,7 @@ describe('claim_issue handler', () => {
         lastUpdated: new Date().toISOString(),
       };
       await writeFile(
-        join(testDir, getLockFileName('tester', 'sample', 998)),
+        join(locksDir, getLockFileName('tester', 'sample', 998)),
         JSON.stringify(stale, null, 2)
       );
 
@@ -128,13 +133,41 @@ describe('claim_issue handler', () => {
     });
   });
 
+  describe('workflow state', () => {
+    it('creates a research-phase state file on successful claim', async () => {
+      const { deps, workflow } = await createEnv();
+
+      await handleClaimIssue({ issueNumber: 42 }, deps);
+
+      const state = await workflow.getWorkflowState('tester', 'sample', 42);
+      expect(state).not.toBeNull();
+      expect(state!.currentPhase).toBe('selection');
+    });
+
+    it('preserves an existing state file (does not overwrite in-flight phase)', async () => {
+      const { deps, workflow } = await createEnv();
+
+      // Pre-create a state at pr phase (e.g., from a prior session's advance_workflow)
+      await workflow.createWorkflowState('tester', 'sample', 55, 'prior-session');
+      await workflow.recordPhaseTransition('tester', 'sample', 55, 'pr', 'test', {
+        skipJustification: 'test',
+      });
+
+      await handleClaimIssue({ issueNumber: 55 }, deps);
+
+      const state = await workflow.getWorkflowState('tester', 'sample', 55);
+      expect(state).not.toBeNull();
+      expect(state!.currentPhase).toBe('pr'); // unchanged
+    });
+  });
+
   describe('LOCK_HELD path', () => {
     it('reports the current holder when the lock is taken by another session', async () => {
-      const { testDir, deps } = await createEnv();
+      const { locksDir, deps } = await createEnv();
 
       // Another session pre-acquires the lock
       const otherSessionId = randomUUID();
-      const otherLocking = new LockingService(otherSessionId, testDir);
+      const otherLocking = new LockingService(otherSessionId, locksDir);
       await otherLocking.acquireLock('tester', 'sample', 99);
 
       const result = await handleClaimIssue({ issueNumber: 99 }, deps);
@@ -151,9 +184,9 @@ describe('claim_issue handler', () => {
     });
 
     it('logs a warn entry on LOCK_HELD with the holder session id', async () => {
-      const { testDir, deps, logger } = await createEnv();
+      const { locksDir, deps, logger } = await createEnv();
       const otherSessionId = randomUUID();
-      const otherLocking = new LockingService(otherSessionId, testDir);
+      const otherLocking = new LockingService(otherSessionId, locksDir);
       await otherLocking.acquireLock('tester', 'sample', 50);
 
       await handleClaimIssue({ issueNumber: 50 }, deps);

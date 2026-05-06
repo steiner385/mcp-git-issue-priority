@@ -3,6 +3,18 @@ import { throttling } from '@octokit/plugin-throttling';
 import { retry } from '@octokit/plugin-retry';
 import type { Issue, Label, IssuePriority, IssueType, PrStatus, CheckStatus } from '../models/index.js';
 import { LABEL_DEFINITIONS } from '../models/index.js';
+import {
+  LIST_ISSUES_WITH_PARENTS_QUERY,
+  LIST_ISSUES_QUERY,
+  GET_PR_STATUS_QUERY,
+  GET_REPO_LABELS_QUERY,
+  type GQLListIssuesResponse,
+  type GQLListIssuesNoParentResponse,
+  type GQLIssueNode,
+  type GQLIssueNodeNoParent,
+  type GQLPrStatusResponse,
+  type GQLLabelsResponse,
+} from './github-graphql.js';
 
 const ThrottledOctokit = Octokit.plugin(throttling, retry);
 
@@ -60,6 +72,36 @@ export class GitHubService {
       ...LABEL_DEFINITIONS.status,
     };
 
+    try {
+      // Single GraphQL call to fetch all existing repo labels at once.
+      // GET_REPO_LABELS_QUERY uses first:50 — sufficient for LABEL_DEFINITIONS (12 labels).
+      type OctokitWithGraphQL = { graphql: <T>(query: string, vars?: Record<string, unknown>) => Promise<T> };
+      const gql = this.octokit as unknown as OctokitWithGraphQL;
+      const response = await gql.graphql<GQLLabelsResponse>(GET_REPO_LABELS_QUERY, { owner, repo });
+      const existingNames = new Set(response.repository.labels.nodes.map((l) => l.name));
+
+      for (const [name, definition] of Object.entries(allLabels)) {
+        if (!existingNames.has(name)) {
+          await this.octokit.issues.createLabel({
+            owner,
+            repo,
+            name,
+            color: definition.color,
+            description: definition.description,
+          });
+        }
+      }
+    } catch {
+      // GraphQL unavailable — fall back to per-label REST GET-then-POST
+      await this.ensureLabelsExistREST(owner, repo, allLabels);
+    }
+  }
+
+  private async ensureLabelsExistREST(
+    owner: string,
+    repo: string,
+    allLabels: Record<string, { color: string; description: string }>
+  ): Promise<void> {
     for (const [name, definition] of Object.entries(allLabels)) {
       try {
         await this.octokit.issues.getLabel({ owner, repo, name });
@@ -118,6 +160,80 @@ export class GitHubService {
     });
 
     return this.mapApiIssue(response.data, owner, repo);
+  }
+
+  async listOpenIssuesWithParents(
+    owner: string,
+    repo: string
+  ): Promise<{ issues: Issue[]; dependencies: Map<number, number | null> }> {
+    // Attempt 1: GraphQL with parent field
+    try {
+      return await this.fetchIssuesGraphQL(owner, repo, true);
+    } catch {
+      // parent field may not be available — try without it
+    }
+
+    // Attempt 2: GraphQL without parent field (still eliminates N+1 pagination)
+    try {
+      return await this.fetchIssuesGraphQL(owner, repo, false);
+    } catch {
+      // GraphQL entirely unavailable — fall back to REST
+    }
+
+    // Attempt 3: REST fallback, no dependency info
+    const issues = await this.listOpenIssues(owner, repo);
+    return { issues, dependencies: new Map() };
+  }
+
+  private async fetchIssuesGraphQL(
+    owner: string,
+    repo: string,
+    withParent: boolean
+  ): Promise<{ issues: Issue[]; dependencies: Map<number, number | null> }> {
+    type OctokitWithGraphQL = { graphql: <T>(query: string, vars?: Record<string, unknown>) => Promise<T> };
+    const gql = (this.octokit as unknown as OctokitWithGraphQL).graphql;
+
+    const query = withParent ? LIST_ISSUES_WITH_PARENTS_QUERY : LIST_ISSUES_QUERY;
+    const allNodes: Array<GQLIssueNode | GQLIssueNodeNoParent> = [];
+    let cursor: string | null = null;
+
+    do {
+      const result: GQLListIssuesResponse | GQLListIssuesNoParentResponse = await gql<GQLListIssuesResponse | GQLListIssuesNoParentResponse>(
+        query,
+        { owner, repo, cursor }
+      );
+      const issuesPage: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: Array<GQLIssueNode | GQLIssueNodeNoParent> } = result.repository.issues;
+      allNodes.push(...issuesPage.nodes);
+      cursor = issuesPage.pageInfo.hasNextPage ? (issuesPage.pageInfo.endCursor ?? null) : null;
+    } while (cursor);
+
+    const issues: Issue[] = allNodes.map((node) => ({
+      number: node.number,
+      title: node.title,
+      body: node.body,
+      state: node.state.toLowerCase() as 'open' | 'closed',
+      created_at: node.createdAt,
+      updated_at: node.updatedAt,
+      labels: node.labels.nodes.map((l) => ({
+        name: l.name,
+        color: l.color,
+        description: l.description,
+      })),
+      assignees: node.assignees.nodes.map((a) => ({ login: a.login })),
+      html_url: node.url,
+      repository: { owner, repo, full_name: `${owner}/${repo}` },
+    }));
+
+    const dependencies = new Map<number, number | null>();
+    if (withParent) {
+      for (const node of allNodes as GQLIssueNode[]) {
+        if (node.parent && node.parent.state === 'OPEN') {
+          dependencies.set(node.number, node.parent.number);
+        }
+      }
+    }
+
+    return { issues, dependencies };
   }
 
   async updateIssueLabel(
@@ -277,6 +393,56 @@ export class GitHubService {
   }
 
   async getPrStatus(owner: string, repo: string, prNumber: number): Promise<PrStatus> {
+    try {
+      type OctokitWithGraphQL = { graphql: <T>(query: string, vars?: Record<string, unknown>) => Promise<T> };
+      const result = await (this.octokit as unknown as OctokitWithGraphQL).graphql<GQLPrStatusResponse>(
+        GET_PR_STATUS_QUERY,
+        { owner, repo, prNumber }
+      );
+
+      const pr = result.repository.pullRequest;
+      if (!pr) {
+        throw new Error(`PR #${prNumber} not found`);
+      }
+
+      let state: 'open' | 'closed' | 'merged' = pr.state.toLowerCase() as 'open' | 'closed';
+      if (pr.state === 'CLOSED' && pr.merged) {
+        state = 'merged';
+      }
+
+      const checkRuns = pr.commits.nodes.flatMap((c) =>
+        c.commit.checkSuites.nodes.flatMap((s) => s.checkRuns.nodes)
+      );
+
+      const checks: CheckStatus[] = checkRuns.map((run) => ({
+        name: run.name,
+        status: this.mapCheckConclusion(run.conclusion),
+      }));
+
+      const ciStatus = this.calculateCiStatus(checks);
+
+      const approved = pr.reviews.nodes.some((r) => r.state === 'APPROVED');
+      const changesRequested = pr.reviews.nodes.some((r) => r.state === 'CHANGES_REQUESTED');
+      const reviewers = [
+        ...new Set(
+          pr.reviews.nodes.map((r) => r.author?.login).filter((l): l is string => Boolean(l))
+        ),
+      ];
+
+      return {
+        prNumber,
+        state,
+        mergeable: pr.mergeable === 'MERGEABLE',
+        ci: { status: ciStatus, checks },
+        reviews: { approved, changesRequested, reviewers },
+        autoMerge: { enabled: pr.autoMergeRequest !== null },
+      };
+    } catch {
+      return this.getPrStatusREST(owner, repo, prNumber);
+    }
+  }
+
+  private async getPrStatusREST(owner: string, repo: string, prNumber: number): Promise<PrStatus> {
     const prResponse = await this.octokit.pulls.get({
       owner,
       repo,
@@ -337,12 +503,13 @@ export class GitHubService {
   }
 
   private mapCheckConclusion(conclusion: string | null): CheckStatus['status'] {
-    switch (conclusion) {
+    switch (conclusion?.toLowerCase()) {
       case 'success':
         return 'success';
       case 'failure':
       case 'timed_out':
       case 'cancelled':
+      case 'action_required':
         return 'failure';
       case 'neutral':
         return 'neutral';

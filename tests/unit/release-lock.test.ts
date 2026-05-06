@@ -106,6 +106,24 @@ describe('release_lock handler', () => {
       expect(await workflow.getWorkflowState('tester', 'sample', 20)).toBeNull();
     });
 
+    it('preserves workflow state when the issue is at pr phase (open PR may exist)', async () => {
+      const { deps, locking, workflow } = await createEnv();
+
+      await locking.acquireLock('tester', 'sample', 22);
+      await workflow.createWorkflowState('tester', 'sample', 22, 'test');
+      await workflow.recordPhaseTransition('tester', 'sample', 22, 'pr', 'test', {
+        skipJustification: 'test skip',
+      });
+
+      await handleReleaseLock({ issueNumber: 22, reason: 'abandoned' }, deps);
+
+      expect(await locking.getLockHolder('tester', 'sample', 22)).toBeNull();
+      // State preserved — select_next_issue must not re-select this issue
+      const state = await workflow.getWorkflowState('tester', 'sample', 22);
+      expect(state).not.toBeNull();
+      expect(state!.currentPhase).toBe('pr');
+    });
+
     it('restores status:backlog label', async () => {
       const { deps, locking, github } = await createEnv();
 

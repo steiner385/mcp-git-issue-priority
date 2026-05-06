@@ -65,16 +65,8 @@ export function registerListBacklogTool(server: McpServer) {
       const limit = args.limit ?? 20;
 
       try {
-        const allIssues = await github.listOpenIssues(owner, repo);
-
-        // Fetch dependency info for all issues
-        const dependencies = new Map<number, number | null>();
-        for (const issue of allIssues) {
-          const parent = await github.getIssueParent(owner, repo, issue.number);
-          if (parent && parent.state === 'open') {
-            dependencies.set(issue.number, parent.number);
-          }
-        }
+        // Single GraphQL query — issues + dependency info in one round-trip per page
+        const { issues: allIssues, dependencies } = await github.listOpenIssuesWithParents(owner, repo);
 
         // Score with dependencies
         const filteredIssues = applyFilters(allIssues, {

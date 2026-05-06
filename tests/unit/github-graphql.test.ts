@@ -103,6 +103,7 @@ describe('GitHubService GraphQL — listOpenIssuesWithParents', () => {
     expect(issues).toHaveLength(1);
     expect(issues[0].number).toBe(10);
     expect(dependencies.size).toBe(0);
+    expect(mockOctokit.graphql).toHaveBeenCalledTimes(2);
   });
 
   it('maps GraphQL label nodes to Issue.labels correctly', async () => {

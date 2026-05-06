@@ -8,6 +8,8 @@ import {
   LIST_ISSUES_QUERY,
   type GQLListIssuesResponse,
   type GQLListIssuesNoParentResponse,
+  type GQLIssueNode,
+  type GQLIssueNodeNoParent,
 } from './github-graphql.js';
 
 const ThrottledOctokit = Octokit.plugin(throttling, retry);
@@ -154,18 +156,21 @@ export class GitHubService {
     repo: string,
     withParent: boolean
   ): Promise<{ issues: Issue[]; dependencies: Map<number, number | null> }> {
+    type OctokitWithGraphQL = { graphql: <T>(query: string, vars?: Record<string, unknown>) => Promise<T> };
+    const gql = (this.octokit as unknown as OctokitWithGraphQL).graphql;
+
     const query = withParent ? LIST_ISSUES_WITH_PARENTS_QUERY : LIST_ISSUES_QUERY;
-    const allNodes: any[] = [];
+    const allNodes: Array<GQLIssueNode | GQLIssueNodeNoParent> = [];
     let cursor: string | null = null;
 
     do {
-      const result = await (this.octokit as any).graphql<GQLListIssuesResponse | GQLListIssuesNoParentResponse>(
+      const result: GQLListIssuesResponse | GQLListIssuesNoParentResponse = await gql<GQLListIssuesResponse | GQLListIssuesNoParentResponse>(
         query,
         { owner, repo, cursor }
       );
-      const { nodes, pageInfo } = result.repository.issues;
-      allNodes.push(...nodes);
-      cursor = pageInfo.hasNextPage ? (pageInfo.endCursor ?? null) : null;
+      const issuesPage: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: Array<GQLIssueNode | GQLIssueNodeNoParent> } = result.repository.issues;
+      allNodes.push(...issuesPage.nodes);
+      cursor = issuesPage.pageInfo.hasNextPage ? (issuesPage.pageInfo.endCursor ?? null) : null;
     } while (cursor);
 
     const issues: Issue[] = allNodes.map((node) => ({
@@ -175,19 +180,19 @@ export class GitHubService {
       state: node.state.toLowerCase() as 'open' | 'closed',
       created_at: node.createdAt,
       updated_at: node.updatedAt,
-      labels: node.labels.nodes.map((l: { name: string; color: string; description: string | null }) => ({
+      labels: node.labels.nodes.map((l) => ({
         name: l.name,
         color: l.color,
         description: l.description,
       })),
-      assignees: node.assignees.nodes.map((a: { login: string }) => ({ login: a.login })),
+      assignees: node.assignees.nodes.map((a) => ({ login: a.login })),
       html_url: node.url,
       repository: { owner, repo, full_name: `${owner}/${repo}` },
     }));
 
     const dependencies = new Map<number, number | null>();
     if (withParent) {
-      for (const node of allNodes) {
+      for (const node of allNodes as GQLIssueNode[]) {
         if (node.parent && node.parent.state === 'OPEN') {
           dependencies.set(node.number, node.parent.number);
         }

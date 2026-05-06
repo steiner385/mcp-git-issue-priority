@@ -1,23 +1,24 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { LockingService, getLockingService } from '../services/locking.js';
+import { WorkflowService, getWorkflowService } from '../services/workflow.js';
 import { AuditLogger, getLogger } from '../services/logging.js';
 import { resolveRepository } from '../utils/repository.js';
 
 /**
- * `claim_issue` is a lightweight, filesystem-only lock acquisition for callers
- * who already know which issue they intend to work on (typed it, picked it
- * from `gh issue list`, came from a slash command, etc.).
+ * `claim_issue` is a lightweight lock acquisition for callers who already know
+ * which issue they intend to work on (typed it, picked it from `gh issue list`,
+ * came from a slash command, etc.).
  *
  * Unlike `select_next_issue` it does NOT:
  *   - Score / re-prioritize the backlog
  *   - Hit the GitHub API
  *   - Mutate issue labels
- *   - Create a workflow state
  *
- * It exists so that workflows that bypass the priority queue still participate
- * in lock coordination. Cheap enough (one filesystem write) to call from
- * every entry point that opens a branch.
+ * It DOES create a workflow state (research phase) if one does not already exist.
+ * Without a state file, `select_next_issue` cannot detect that this issue is
+ * in-flight and will re-select it from the backlog — producing duplicate work.
+ * An existing state file (e.g. at pr/review phase) is preserved unchanged.
  *
  * Sweeps stale locks before attempting acquisition so a session that crashed
  * without releasing doesn't permanently block its issue.
@@ -30,6 +31,7 @@ export interface ClaimIssueArgs {
 
 export interface ClaimIssueDeps {
   locking: LockingService;
+  workflow: WorkflowService;
   logger: Pick<AuditLogger, 'info' | 'warn' | 'error'>;
 }
 
@@ -49,7 +51,7 @@ export async function handleClaimIssue(
   deps: ClaimIssueDeps
 ): Promise<ToolResult> {
   const startTime = Date.now();
-  const { locking, logger } = deps;
+  const { locking, workflow, logger } = deps;
 
   const parsed = resolveRepository(args.repository);
   if (!parsed) {
@@ -80,6 +82,14 @@ export async function handleClaimIssue(
     const result = await locking.acquireLock(owner, repo, args.issueNumber);
 
     if (result.success) {
+      // Ensure a workflow state exists so select_next_issue can detect this
+      // issue is in-flight and skip it. Preserve any existing state (e.g. pr
+      // phase from a prior session) — only create if the file is absent.
+      const existingState = await workflow.getWorkflowState(owner, repo, args.issueNumber);
+      if (!existingState) {
+        await workflow.createWorkflowState(owner, repo, args.issueNumber, 'claim_issue');
+      }
+
       const duration = Date.now() - startTime;
       await logger.info('claim_issue', {
         repoFullName,
@@ -167,6 +177,7 @@ export function registerClaimIssueTool(server: McpServer) {
     async (args) =>
       handleClaimIssue(args, {
         locking: getLockingService(),
+        workflow: getWorkflowService(),
         logger: getLogger(),
       })
   );

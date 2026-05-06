@@ -73,7 +73,8 @@ export class GitHubService {
     };
 
     try {
-      // Single GraphQL call to fetch all existing repo labels at once
+      // Single GraphQL call to fetch all existing repo labels at once.
+      // GET_REPO_LABELS_QUERY uses first:50 — sufficient for LABEL_DEFINITIONS (12 labels).
       type OctokitWithGraphQL = { graphql: <T>(query: string, vars?: Record<string, unknown>) => Promise<T> };
       const gql = this.octokit as unknown as OctokitWithGraphQL;
       const response = await gql.graphql<GQLLabelsResponse>(GET_REPO_LABELS_QUERY, { owner, repo });

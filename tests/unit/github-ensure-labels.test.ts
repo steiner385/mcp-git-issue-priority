@@ -69,6 +69,6 @@ describe('GitHubService.ensureLabelsExist — GraphQL bulk fetch', () => {
     await github.ensureLabelsExist('owner', 'repo');
 
     expect(mockOctokit.graphql).toHaveBeenCalledTimes(1);
-    expect(mockOctokit.issues.createLabel).toHaveBeenCalledTimes(12);
+    expect(mockOctokit.issues.createLabel).toHaveBeenCalledTimes(ALL_LABEL_NAMES.length);
   });
 });

@@ -61,7 +61,7 @@ describe('claim_issue handler', () => {
     });
 
     it('uses the explicit repository argument over the env var', async () => {
-      const { deps, locking, locksDir } = await createEnv();
+      const { deps, locking } = await createEnv();
       process.env.GITHUB_REPOSITORY = 'env/wrong';
 
       await handleClaimIssue({ issueNumber: 5, repository: 'arg/right' }, deps);
@@ -145,7 +145,7 @@ describe('claim_issue handler', () => {
     });
 
     it('preserves an existing state file (does not overwrite in-flight phase)', async () => {
-      const { deps, locking, workflow } = await createEnv();
+      const { deps, workflow } = await createEnv();
 
       // Pre-create a state at pr phase (e.g., from a prior session's advance_workflow)
       await workflow.createWorkflowState('tester', 'sample', 55, 'prior-session');

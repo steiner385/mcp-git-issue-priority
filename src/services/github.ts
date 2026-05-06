@@ -3,6 +3,12 @@ import { throttling } from '@octokit/plugin-throttling';
 import { retry } from '@octokit/plugin-retry';
 import type { Issue, Label, IssuePriority, IssueType, PrStatus, CheckStatus } from '../models/index.js';
 import { LABEL_DEFINITIONS } from '../models/index.js';
+import {
+  LIST_ISSUES_WITH_PARENTS_QUERY,
+  LIST_ISSUES_QUERY,
+  type GQLListIssuesResponse,
+  type GQLListIssuesNoParentResponse,
+} from './github-graphql.js';
 
 const ThrottledOctokit = Octokit.plugin(throttling, retry);
 
@@ -118,6 +124,77 @@ export class GitHubService {
     });
 
     return this.mapApiIssue(response.data, owner, repo);
+  }
+
+  async listOpenIssuesWithParents(
+    owner: string,
+    repo: string
+  ): Promise<{ issues: Issue[]; dependencies: Map<number, number | null> }> {
+    // Attempt 1: GraphQL with parent field
+    try {
+      return await this.fetchIssuesGraphQL(owner, repo, true);
+    } catch {
+      // parent field may not be available — try without it
+    }
+
+    // Attempt 2: GraphQL without parent field (still eliminates N+1 pagination)
+    try {
+      return await this.fetchIssuesGraphQL(owner, repo, false);
+    } catch {
+      // GraphQL entirely unavailable — fall back to REST
+    }
+
+    // Attempt 3: REST fallback, no dependency info
+    const issues = await this.listOpenIssues(owner, repo);
+    return { issues, dependencies: new Map() };
+  }
+
+  private async fetchIssuesGraphQL(
+    owner: string,
+    repo: string,
+    withParent: boolean
+  ): Promise<{ issues: Issue[]; dependencies: Map<number, number | null> }> {
+    const query = withParent ? LIST_ISSUES_WITH_PARENTS_QUERY : LIST_ISSUES_QUERY;
+    const allNodes: any[] = [];
+    let cursor: string | null = null;
+
+    do {
+      const result = await (this.octokit as any).graphql<GQLListIssuesResponse | GQLListIssuesNoParentResponse>(
+        query,
+        { owner, repo, cursor }
+      );
+      const { nodes, pageInfo } = result.repository.issues;
+      allNodes.push(...nodes);
+      cursor = pageInfo.hasNextPage ? (pageInfo.endCursor ?? null) : null;
+    } while (cursor);
+
+    const issues: Issue[] = allNodes.map((node) => ({
+      number: node.number,
+      title: node.title,
+      body: node.body,
+      state: node.state.toLowerCase() as 'open' | 'closed',
+      created_at: node.createdAt,
+      updated_at: node.updatedAt,
+      labels: node.labels.nodes.map((l: { name: string; color: string; description: string | null }) => ({
+        name: l.name,
+        color: l.color,
+        description: l.description,
+      })),
+      assignees: node.assignees.nodes.map((a: { login: string }) => ({ login: a.login })),
+      html_url: node.url,
+      repository: { owner, repo, full_name: `${owner}/${repo}` },
+    }));
+
+    const dependencies = new Map<number, number | null>();
+    if (withParent) {
+      for (const node of allNodes) {
+        if (node.parent && node.parent.state === 'OPEN') {
+          dependencies.set(node.number, node.parent.number);
+        }
+      }
+    }
+
+    return { issues, dependencies };
   }
 
   async updateIssueLabel(

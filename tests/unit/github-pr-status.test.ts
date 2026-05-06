@@ -210,3 +210,120 @@ describe('GitHubService PR Status', () => {
     });
   });
 });
+
+describe('getPrStatus — GraphQL path', () => {
+  let github: GitHubService;
+  let mockOctokit: any;
+
+  beforeEach(() => {
+    mockOctokit = {
+      graphql: vi.fn(),
+      pulls: { get: vi.fn() },
+      checks: { listForRef: vi.fn() },
+      request: vi.fn(),
+    };
+    github = new GitHubService({ token: 'test-token' });
+    (github as any).octokit = mockOctokit;
+  });
+
+  const makeGQLPrResponse = (overrides: any = {}) => ({
+    repository: {
+      pullRequest: {
+        number: 42,
+        state: 'OPEN',
+        merged: false,
+        mergeable: 'MERGEABLE',
+        autoMergeRequest: { mergeMethod: 'SQUASH' },
+        headRefOid: 'abc123',
+        commits: {
+          nodes: [{
+            commit: {
+              checkSuites: {
+                nodes: [{
+                  checkRuns: {
+                    nodes: [
+                      { name: 'build', conclusion: 'SUCCESS', status: 'COMPLETED' },
+                      { name: 'test', conclusion: 'SUCCESS', status: 'COMPLETED' },
+                    ],
+                  },
+                }],
+              },
+            },
+          }],
+        },
+        reviews: {
+          nodes: [{ state: 'APPROVED', author: { login: 'alice' } }],
+        },
+        ...overrides,
+      },
+    },
+  });
+
+  it('returns complete PR status via GraphQL', async () => {
+    mockOctokit.graphql.mockResolvedValueOnce(makeGQLPrResponse());
+
+    const status = await github.getPrStatus('owner', 'repo', 42);
+
+    expect(status.prNumber).toBe(42);
+    expect(status.state).toBe('open');
+    expect(status.mergeable).toBe(true);
+    expect(status.ci.status).toBe('passing');
+    expect(status.reviews.approved).toBe(true);
+    expect(status.autoMerge.enabled).toBe(true);
+    expect(mockOctokit.pulls.get).not.toHaveBeenCalled();
+  });
+
+  it('detects merged PR via GraphQL', async () => {
+    mockOctokit.graphql.mockResolvedValueOnce(
+      makeGQLPrResponse({ state: 'CLOSED', merged: true, mergeable: null })
+    );
+
+    const status = await github.getPrStatus('owner', 'repo', 42);
+    expect(status.state).toBe('merged');
+  });
+
+  it('detects pending CI via GraphQL (in_progress check run)', async () => {
+    mockOctokit.graphql.mockResolvedValueOnce(
+      makeGQLPrResponse({
+        commits: {
+          nodes: [{
+            commit: {
+              checkSuites: {
+                nodes: [{
+                  checkRuns: {
+                    nodes: [
+                      { name: 'build', conclusion: 'SUCCESS', status: 'COMPLETED' },
+                      { name: 'test', conclusion: null, status: 'IN_PROGRESS' },
+                    ],
+                  },
+                }],
+              },
+            },
+          }],
+        },
+      })
+    );
+
+    const status = await github.getPrStatus('owner', 'repo', 42);
+    expect(status.ci.status).toBe('pending');
+  });
+
+  it('falls back to REST when GraphQL throws', async () => {
+    mockOctokit.graphql.mockRejectedValueOnce(new Error('GraphQL error'));
+    mockOctokit.pulls.get.mockResolvedValueOnce({
+      data: {
+        number: 42, state: 'open', mergeable: true,
+        head: { sha: 'abc123' }, auto_merge: null,
+      },
+    });
+    mockOctokit.checks.listForRef.mockResolvedValueOnce({
+      data: { check_runs: [] },
+    });
+    mockOctokit.request.mockResolvedValueOnce({ data: [] });
+
+    const status = await github.getPrStatus('owner', 'repo', 42);
+
+    expect(status.prNumber).toBe(42);
+    expect(mockOctokit.pulls.get).toHaveBeenCalledTimes(1);
+  });
+});

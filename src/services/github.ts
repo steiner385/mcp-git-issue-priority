@@ -6,10 +6,12 @@ import { LABEL_DEFINITIONS } from '../models/index.js';
 import {
   LIST_ISSUES_WITH_PARENTS_QUERY,
   LIST_ISSUES_QUERY,
+  GET_PR_STATUS_QUERY,
   type GQLListIssuesResponse,
   type GQLListIssuesNoParentResponse,
   type GQLIssueNode,
   type GQLIssueNodeNoParent,
+  type GQLPrStatusResponse,
 } from './github-graphql.js';
 
 const ThrottledOctokit = Octokit.plugin(throttling, retry);
@@ -359,6 +361,56 @@ export class GitHubService {
   }
 
   async getPrStatus(owner: string, repo: string, prNumber: number): Promise<PrStatus> {
+    try {
+      type OctokitWithGraphQL = { graphql: <T>(query: string, vars?: Record<string, unknown>) => Promise<T> };
+      const result = await (this.octokit as unknown as OctokitWithGraphQL).graphql<GQLPrStatusResponse>(
+        GET_PR_STATUS_QUERY,
+        { owner, repo, prNumber }
+      );
+
+      const pr = result.repository.pullRequest;
+      if (!pr) {
+        throw new Error(`PR #${prNumber} not found`);
+      }
+
+      let state: 'open' | 'closed' | 'merged' = pr.state.toLowerCase() as 'open' | 'closed';
+      if (pr.state === 'CLOSED' && pr.merged) {
+        state = 'merged';
+      }
+
+      const checkRuns = pr.commits.nodes.flatMap((c) =>
+        c.commit.checkSuites.nodes.flatMap((s) => s.checkRuns.nodes)
+      );
+
+      const checks: CheckStatus[] = checkRuns.map((run) => ({
+        name: run.name,
+        status: this.mapCheckConclusion(run.conclusion),
+      }));
+
+      const ciStatus = this.calculateCiStatus(checks);
+
+      const approved = pr.reviews.nodes.some((r) => r.state === 'APPROVED');
+      const changesRequested = pr.reviews.nodes.some((r) => r.state === 'CHANGES_REQUESTED');
+      const reviewers = [
+        ...new Set(
+          pr.reviews.nodes.map((r) => r.author?.login).filter((l): l is string => Boolean(l))
+        ),
+      ];
+
+      return {
+        prNumber,
+        state,
+        mergeable: pr.mergeable === 'MERGEABLE',
+        ci: { status: ciStatus, checks },
+        reviews: { approved, changesRequested, reviewers },
+        autoMerge: { enabled: pr.autoMergeRequest !== null },
+      };
+    } catch {
+      return this.getPrStatusREST(owner, repo, prNumber);
+    }
+  }
+
+  private async getPrStatusREST(owner: string, repo: string, prNumber: number): Promise<PrStatus> {
     const prResponse = await this.octokit.pulls.get({
       owner,
       repo,
@@ -419,12 +471,13 @@ export class GitHubService {
   }
 
   private mapCheckConclusion(conclusion: string | null): CheckStatus['status'] {
-    switch (conclusion) {
+    switch (conclusion?.toLowerCase()) {
       case 'success':
         return 'success';
       case 'failure':
       case 'timed_out':
       case 'cancelled':
+      case 'action_required':
         return 'failure';
       case 'neutral':
         return 'neutral';

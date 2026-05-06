@@ -7,11 +7,13 @@ import {
   LIST_ISSUES_WITH_PARENTS_QUERY,
   LIST_ISSUES_QUERY,
   GET_PR_STATUS_QUERY,
+  GET_REPO_LABELS_QUERY,
   type GQLListIssuesResponse,
   type GQLListIssuesNoParentResponse,
   type GQLIssueNode,
   type GQLIssueNodeNoParent,
   type GQLPrStatusResponse,
+  type GQLLabelsResponse,
 } from './github-graphql.js';
 
 const ThrottledOctokit = Octokit.plugin(throttling, retry);
@@ -70,6 +72,35 @@ export class GitHubService {
       ...LABEL_DEFINITIONS.status,
     };
 
+    try {
+      // Single GraphQL call to fetch all existing repo labels at once
+      type OctokitWithGraphQL = { graphql: <T>(query: string, vars?: Record<string, unknown>) => Promise<T> };
+      const gql = this.octokit as unknown as OctokitWithGraphQL;
+      const response = await gql.graphql<GQLLabelsResponse>(GET_REPO_LABELS_QUERY, { owner, repo });
+      const existingNames = new Set(response.repository.labels.nodes.map((l) => l.name));
+
+      for (const [name, definition] of Object.entries(allLabels)) {
+        if (!existingNames.has(name)) {
+          await this.octokit.issues.createLabel({
+            owner,
+            repo,
+            name,
+            color: definition.color,
+            description: definition.description,
+          });
+        }
+      }
+    } catch {
+      // GraphQL unavailable — fall back to per-label REST GET-then-POST
+      await this.ensureLabelsExistREST(owner, repo, allLabels);
+    }
+  }
+
+  private async ensureLabelsExistREST(
+    owner: string,
+    repo: string,
+    allLabels: Record<string, { color: string; description: string }>
+  ): Promise<void> {
     for (const [name, definition] of Object.entries(allLabels)) {
       try {
         await this.octokit.issues.getLabel({ owner, repo, name });

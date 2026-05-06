@@ -104,10 +104,21 @@ export function registerSelectNextIssueTool(server: McpServer) {
           };
         }
 
+        // Phases where work is already in-flight across sessions — durable
+        // workflow state, not the ephemeral session lock. Issues in these
+        // phases have an open PR and must not be re-selected by another agent.
+        const IN_FLIGHT_PHASES = new Set(['pr', 'review', 'merged']);
+
         let selectedIssue = null;
         let lockResult = null;
 
         for (const { issue, score, ageInDays } of scoredIssues) {
+          // Skip issues whose durable workflow phase shows work is in-flight.
+          const workflowState = await workflow.getWorkflowState(owner, repo, issue.number);
+          if (workflowState && IN_FLIGHT_PHASES.has(workflowState.currentPhase)) {
+            continue;
+          }
+
           const result = await locking.acquireLock(owner, repo, issue.number);
 
           if (result.success) {

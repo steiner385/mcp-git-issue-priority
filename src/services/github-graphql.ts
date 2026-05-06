@@ -22,6 +22,27 @@ export const LIST_ISSUES_WITH_PARENTS_QUERY = `
   }
 `;
 
+export const LIST_ISSUES_QUERY = `
+  query ListOpenIssues($owner: String!, $repo: String!, $cursor: String) {
+    repository(owner: $owner, name: $repo) {
+      issues(first: 100, after: $cursor, states: [OPEN]) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          number
+          title
+          body
+          state
+          url
+          createdAt
+          updatedAt
+          labels(first: 20) { nodes { name color description } }
+          assignees(first: 10) { nodes { login } }
+        }
+      }
+    }
+  }
+`;
+
 export const GET_PR_STATUS_QUERY = `
   query GetPrStatus($owner: String!, $repo: String!, $prNumber: Int!) {
     repository(owner: $owner, name: $repo) {
@@ -70,13 +91,13 @@ export interface GQLIssueNode {
   number: number;
   title: string;
   body: string | null;
-  state: string;
+  state: 'OPEN' | 'CLOSED';
   url: string;
   createdAt: string;
   updatedAt: string;
   labels: { nodes: Array<{ name: string; color: string; description: string | null }> };
   assignees: { nodes: Array<{ login: string }> };
-  parent: { number: number; state: string } | null;
+  parent: { number: number; state: 'OPEN' | 'CLOSED' } | null;
 }
 
 export interface GQLListIssuesResponse {
@@ -88,13 +109,34 @@ export interface GQLListIssuesResponse {
   };
 }
 
+export interface GQLIssueNodeNoParent {
+  number: number;
+  title: string;
+  body: string | null;
+  state: 'OPEN' | 'CLOSED';
+  url: string;
+  createdAt: string;
+  updatedAt: string;
+  labels: { nodes: Array<{ name: string; color: string; description: string | null }> };
+  assignees: { nodes: Array<{ login: string }> };
+}
+
+export interface GQLListIssuesNoParentResponse {
+  repository: {
+    issues: {
+      pageInfo: { hasNextPage: boolean; endCursor: string | null };
+      nodes: GQLIssueNodeNoParent[];
+    };
+  };
+}
+
 export interface GQLPrStatusResponse {
   repository: {
     pullRequest: {
       number: number;
-      state: string;
+      state: 'OPEN' | 'CLOSED' | 'MERGED';
       merged: boolean;
-      mergeable: string | null;
+      mergeable: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN' | null;
       autoMergeRequest: { mergeMethod: string } | null;
       headRefOid: string;
       commits: {
@@ -103,7 +145,7 @@ export interface GQLPrStatusResponse {
             checkSuites: {
               nodes: Array<{
                 checkRuns: {
-                  nodes: Array<{ name: string; conclusion: string | null; status: string }>;
+                  nodes: Array<{ name: string; conclusion: 'SUCCESS' | 'FAILURE' | 'NEUTRAL' | 'CANCELLED' | 'TIMED_OUT' | 'ACTION_REQUIRED' | 'SKIPPED' | null; status: 'QUEUED' | 'IN_PROGRESS' | 'COMPLETED' }>;
                 };
               }>;
             };
@@ -111,7 +153,7 @@ export interface GQLPrStatusResponse {
         }>;
       };
       reviews: {
-        nodes: Array<{ state: string; author: { login: string } | null }>;
+        nodes: Array<{ state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING'; author: { login: string } | null }>;
       };
     } | null;
   };

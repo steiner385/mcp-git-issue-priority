@@ -6,17 +6,20 @@ import { LABEL_DEFINITIONS } from '../models/index.js';
 import {
   LIST_ISSUES_WITH_PARENTS_QUERY,
   LIST_ISSUES_QUERY,
+
   LIST_ISSUES_DELTA_QUERY,
   GET_PR_STATUS_QUERY,
   GET_REPO_LABELS_QUERY,
   type GQLListIssuesResponse,
   type GQLListIssuesNoParentResponse,
+
   type GQLListIssuesDeltaResponse,
   type GQLIssueNode,
   type GQLIssueNodeNoParent,
   type GQLPrStatusResponse,
   type GQLLabelsResponse,
 } from './github-graphql.js';
+
 import { type CacheService, type CachedIssues, getCacheService } from './cache.js';
 
 const ThrottledOctokit = Octokit.plugin(throttling, retry);

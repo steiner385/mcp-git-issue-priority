@@ -2,7 +2,7 @@ import { readFile, writeFile, unlink, mkdir, rename } from 'fs/promises';
 import { join, dirname } from 'path';
 import { randomUUID } from 'crypto';
 import { getCacheDir } from '../config/index.js';
-import type { Issue } from '../models/index.js';
+import type { Issue, Label } from '../models/index.js';
 import type { PrStatus } from '../models/index.js';
 
 const LABELS_TTL_MS = 60 * 60 * 1000;
@@ -131,6 +131,71 @@ export class CacheService {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
         console.error(`[cache] invalidateLabels failed: ${(err as Error).message}`);
       }
+    }
+  }
+
+  async patchIssueLabels(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+    addLabels: string[],
+    removeLabels: string[]
+  ): Promise<void> {
+    try {
+      const envelope = await readEnvelope<CachedIssues>(this.issuesPath(owner, repo));
+      if (!envelope) return;
+      const idx = envelope.data.issues.findIndex((i) => i.number === issueNumber);
+      if (idx === -1) return;
+      const removeSet = new Set(removeLabels.map((l) => l.toLowerCase()));
+      const kept: Label[] = envelope.data.issues[idx].labels.filter(
+        (l) => !removeSet.has(l.name.toLowerCase())
+      );
+      const added: Label[] = addLabels.map((name) => ({ name, color: '', description: null }));
+      const patchedIssues = [...envelope.data.issues];
+      patchedIssues[idx] = { ...patchedIssues[idx], labels: [...kept, ...added] };
+      await atomicWrite<CachedIssues>(this.issuesPath(owner, repo), {
+        ...envelope,
+        lastModifiedAt: new Date().toISOString(),
+        data: { ...envelope.data, issues: patchedIssues },
+      });
+    } catch (err) {
+      console.error(`[cache] patchIssueLabels failed: ${(err as Error).message}`);
+    }
+  }
+
+  async evictIssue(owner: string, repo: string, issueNumber: number): Promise<void> {
+    try {
+      const envelope = await readEnvelope<CachedIssues>(this.issuesPath(owner, repo));
+      if (!envelope) return;
+      await atomicWrite<CachedIssues>(this.issuesPath(owner, repo), {
+        ...envelope,
+        lastModifiedAt: new Date().toISOString(),
+        data: {
+          issues: envelope.data.issues.filter((i) => i.number !== issueNumber),
+          dependencies: envelope.data.dependencies.filter(([n]) => n !== issueNumber),
+        },
+      });
+    } catch (err) {
+      console.error(`[cache] evictIssue failed: ${(err as Error).message}`);
+    }
+  }
+
+  async addIssue(owner: string, repo: string, issue: Issue): Promise<void> {
+    try {
+      const envelope = await readEnvelope<CachedIssues>(this.issuesPath(owner, repo));
+      if (!envelope) return;
+      const filteredIssues = envelope.data.issues.filter((i) => i.number !== issue.number);
+      const filteredDeps = envelope.data.dependencies.filter(([n]) => n !== issue.number);
+      await atomicWrite<CachedIssues>(this.issuesPath(owner, repo), {
+        ...envelope,
+        lastModifiedAt: issue.updated_at,
+        data: {
+          issues: [...filteredIssues, issue],
+          dependencies: [...filteredDeps, [issue.number, null]],
+        },
+      });
+    } catch (err) {
+      console.error(`[cache] addIssue failed: ${(err as Error).message}`);
     }
   }
 

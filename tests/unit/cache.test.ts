@@ -102,6 +102,81 @@ describe('CacheService', () => {
     });
   });
 
+  describe('patchIssueLabels', () => {
+    it('updates labels on the target issue and advances lastModifiedAt', async () => {
+      const issue = { ...makeIssue(1), labels: [{ name: 'status:backlog', color: 'aaa', description: null }] };
+      await cache.setIssues('owner', 'repo', { issues: [issue], dependencies: [[1, null]] }, '2026-01-01T00:00:00.000Z');
+
+      await cache.patchIssueLabels('owner', 'repo', 1, ['status:in-progress'], ['status:backlog']);
+
+      const result = await cache.getIssues('owner', 'repo');
+      const labels = result!.data.issues[0].labels.map((l) => l.name);
+      expect(labels).toContain('status:in-progress');
+      expect(labels).not.toContain('status:backlog');
+      expect(result!.lastModifiedAt).not.toBe('2026-01-01T00:00:00.000Z');
+    });
+
+    it('leaves other issues untouched', async () => {
+      const issues = [makeIssue(1), makeIssue(2)];
+      await cache.setIssues('owner', 'repo', { issues, dependencies: [] }, '2026-01-01T00:00:00.000Z');
+
+      await cache.patchIssueLabels('owner', 'repo', 1, ['type:bug'], []);
+
+      const result = await cache.getIssues('owner', 'repo');
+      expect(result!.data.issues).toHaveLength(2);
+      expect(result!.data.issues[1].number).toBe(2);
+    });
+
+    it('is a no-op when cache is empty', async () => {
+      await expect(cache.patchIssueLabels('owner', 'repo', 1, ['type:bug'], [])).resolves.not.toThrow();
+    });
+
+    it('is a no-op when issue is not in cache', async () => {
+      await cache.setIssues('owner', 'repo', { issues: [makeIssue(2)], dependencies: [] }, '2026-01-01T00:00:00.000Z');
+      await cache.patchIssueLabels('owner', 'repo', 999, ['type:bug'], []);
+
+      const result = await cache.getIssues('owner', 'repo');
+      expect(result!.data.issues).toHaveLength(1);
+    });
+  });
+
+  describe('evictIssue', () => {
+    it('removes the issue from the cache and advances lastModifiedAt', async () => {
+      const issues = [makeIssue(1), makeIssue(2)];
+      await cache.setIssues('owner', 'repo', { issues, dependencies: [[1, null], [2, 1]] }, '2026-01-01T00:00:00.000Z');
+
+      await cache.evictIssue('owner', 'repo', 1);
+
+      const result = await cache.getIssues('owner', 'repo');
+      expect(result!.data.issues.map((i) => i.number)).toEqual([2]);
+      expect(result!.data.dependencies.map(([n]) => n)).not.toContain(1);
+      expect(result!.lastModifiedAt).not.toBe('2026-01-01T00:00:00.000Z');
+    });
+
+    it('is a no-op when cache is empty', async () => {
+      await expect(cache.evictIssue('owner', 'repo', 1)).resolves.not.toThrow();
+    });
+  });
+
+  describe('addIssue', () => {
+    it('appends the new issue and its dependency entry', async () => {
+      await cache.setIssues('owner', 'repo', { issues: [makeIssue(1)], dependencies: [[1, null]] }, '2026-01-01T00:00:00.000Z');
+
+      const newIssue = makeIssue(2, '2026-06-01T00:00:00.000Z');
+      await cache.addIssue('owner', 'repo', newIssue);
+
+      const result = await cache.getIssues('owner', 'repo');
+      expect(result!.data.issues.map((i) => i.number)).toContain(2);
+      expect(result!.data.dependencies.map(([n]) => n)).toContain(2);
+      expect(result!.lastModifiedAt).toBe('2026-06-01T00:00:00.000Z');
+    });
+
+    it('is a no-op when cache is empty', async () => {
+      await expect(cache.addIssue('owner', 'repo', makeIssue(1))).resolves.not.toThrow();
+      expect(await cache.getIssues('owner', 'repo')).toBeNull();
+    });
+  });
+
   describe('invalidateIssues', () => {
     it('deletes the cache file', async () => {
       await cache.setIssues('owner', 'repo', { issues: [], dependencies: [] }, '2026-05-06T00:00:00.000Z');

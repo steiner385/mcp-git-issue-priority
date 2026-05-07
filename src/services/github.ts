@@ -156,8 +156,9 @@ export class GitHubService {
       labels,
     });
 
-    await this.cacheService.invalidateIssues(owner, repo);
-    return this.mapApiIssue(response.data, owner, repo);
+    const issue = this.mapApiIssue(response.data, owner, repo);
+    await this.cacheService.addIssue(owner, repo, issue);
+    return issue;
   }
 
   async listOpenIssues(owner: string, repo: string): Promise<Issue[]> {
@@ -376,7 +377,7 @@ export class GitHubService {
       });
     }
 
-    await this.cacheService.invalidateIssues(owner, repo);
+    await this.cacheService.patchIssueLabels(owner, repo, issueNumber, addLabels, removeLabels);
   }
 
   async createBranch(
@@ -449,7 +450,7 @@ export class GitHubService {
       issue_number: issueNumber,
       state: 'closed',
     });
-    await this.cacheService.invalidateIssues(owner, repo);
+    await this.cacheService.evictIssue(owner, repo, issueNumber);
   }
 
   async updateIssueState(
@@ -464,7 +465,11 @@ export class GitHubService {
       issue_number: issueNumber,
       state,
     });
-    await this.cacheService.invalidateIssues(owner, repo);
+    if (state === 'closed') {
+      await this.cacheService.evictIssue(owner, repo, issueNumber);
+    } else {
+      await this.cacheService.invalidateIssues(owner, repo);
+    }
   }
 
   async verifyRepoAccess(owner: string, repo: string): Promise<boolean> {

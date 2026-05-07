@@ -263,13 +263,14 @@ describe('GitHubService — cache invalidations on writes', () => {
     (github as any).octokit = mockOctokit;
   });
 
-  it('invalidates issues cache after updateIssueLabel', async () => {
+  it('patches labels in cache after updateIssueLabel (no full invalidation)', async () => {
     await github.updateIssueLabel('owner', 'repo', 1, ['status:in-progress'], ['status:backlog']);
 
-    expect(mockCache.invalidateIssues).toHaveBeenCalledWith('owner', 'repo');
+    expect(mockCache.patchIssueLabels).toHaveBeenCalledWith('owner', 'repo', 1, ['status:in-progress'], ['status:backlog']);
+    expect(mockCache.invalidateIssues).not.toHaveBeenCalled();
   });
 
-  it('invalidates issues cache after createIssue', async () => {
+  it('adds new issue to cache after createIssue (no full invalidation)', async () => {
     const allLabelNames = [
       'priority:critical', 'priority:high', 'priority:medium', 'priority:low',
       'type:bug', 'type:feature', 'type:chore', 'type:docs',
@@ -281,18 +282,28 @@ describe('GitHubService — cache invalidations on writes', () => {
       owner: 'owner', repo: 'repo', title: 'New issue', priority: 'high', type: 'bug',
     });
 
-    expect(mockCache.invalidateIssues).toHaveBeenCalledWith('owner', 'repo');
+    expect(mockCache.addIssue).toHaveBeenCalledWith('owner', 'repo', expect.objectContaining({ number: 99 }));
+    expect(mockCache.invalidateIssues).not.toHaveBeenCalled();
   });
 
-  it('invalidates issues cache after closeIssue', async () => {
+  it('evicts issue from cache after closeIssue (no full invalidation)', async () => {
     await github.closeIssue('owner', 'repo', 1);
 
-    expect(mockCache.invalidateIssues).toHaveBeenCalledWith('owner', 'repo');
+    expect(mockCache.evictIssue).toHaveBeenCalledWith('owner', 'repo', 1);
+    expect(mockCache.invalidateIssues).not.toHaveBeenCalled();
   });
 
-  it('invalidates issues cache after updateIssueState', async () => {
+  it('evicts issue from cache after updateIssueState closed', async () => {
     await github.updateIssueState('owner', 'repo', 1, 'closed');
 
+    expect(mockCache.evictIssue).toHaveBeenCalledWith('owner', 'repo', 1);
+    expect(mockCache.invalidateIssues).not.toHaveBeenCalled();
+  });
+
+  it('fully invalidates cache after updateIssueState open (re-open adds unknown issue)', async () => {
+    await github.updateIssueState('owner', 'repo', 1, 'open');
+
     expect(mockCache.invalidateIssues).toHaveBeenCalledWith('owner', 'repo');
+    expect(mockCache.evictIssue).not.toHaveBeenCalled();
   });
 });

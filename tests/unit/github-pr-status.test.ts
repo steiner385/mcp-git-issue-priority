@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GitHubService } from '../../src/services/github.js';
+import { makeNullCache } from './null-cache.js';
 
 describe('GitHubService PR Status', () => {
   let github: GitHubService;
@@ -11,7 +12,7 @@ describe('GitHubService PR Status', () => {
       checks: { listForRef: vi.fn() },
       request: vi.fn(),
     };
-    github = new GitHubService({ token: 'test-token' });
+    github = new GitHubService({ token: 'test-token', cacheService: makeNullCache() });
     (github as any).octokit = mockOctokit;
   });
 
@@ -222,7 +223,7 @@ describe('getPrStatus — GraphQL path', () => {
       checks: { listForRef: vi.fn() },
       request: vi.fn(),
     };
-    github = new GitHubService({ token: 'test-token' });
+    github = new GitHubService({ token: 'test-token', cacheService: makeNullCache() });
     (github as any).octokit = mockOctokit;
   });
 

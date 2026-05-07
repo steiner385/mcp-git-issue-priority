@@ -9,6 +9,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createConfig, ensureDirectories, setConfig } from './config/index.js';
 import { initializeLogger } from './services/logging.js';
+import { initializeCacheService } from './services/cache.js';
 import { initializeGitHubService } from './services/github.js';
 
 import { registerCreateIssueTool } from './tools/create-issue.js';
@@ -86,6 +87,7 @@ async function main() {
     await ensureDirectories();
 
     initializeLogger(config.sessionId);
+    initializeCacheService(config.cacheDir);
     initializeGitHubService(config.githubToken);
 
     const server = new McpServer({

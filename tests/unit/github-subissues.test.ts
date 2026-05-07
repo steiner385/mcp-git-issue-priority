@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GitHubService } from '../../src/services/github.js';
+import { makeNullCache } from './null-cache.js';
 
 describe('GitHubService Sub-Issues', () => {
   let github: GitHubService;
@@ -9,7 +10,7 @@ describe('GitHubService Sub-Issues', () => {
     mockOctokit = {
       request: vi.fn(),
     };
-    github = new GitHubService({ token: 'test-token' });
+    github = new GitHubService({ token: 'test-token', cacheService: makeNullCache() });
     (github as any).octokit = mockOctokit;
   });
 

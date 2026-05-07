@@ -8,6 +8,7 @@ export interface Config {
   locksDir: string;
   workflowDir: string;
   logsDir: string;
+  cacheDir: string;
   githubToken: string;
   sessionId: string;
   defaultRepository?: { owner: string; repo: string };
@@ -35,8 +36,12 @@ export function getBatchesDir(): string {
   return join(getBaseDir(), 'batches');
 }
 
+export function getCacheDir(): string {
+  return join(getBaseDir(), 'cache');
+}
+
 export async function ensureDirectories(): Promise<void> {
-  const dirs = [getBaseDir(), getLocksDir(), getWorkflowDir(), getLogsDir(), getBatchesDir()];
+  const dirs = [getBaseDir(), getLocksDir(), getWorkflowDir(), getLogsDir(), getBatchesDir(), getCacheDir()];
   for (const dir of dirs) {
     await mkdir(dir, { recursive: true });
   }
@@ -102,6 +107,7 @@ export function createConfig(githubToken?: string): Config {
     locksDir: getLocksDir(),
     workflowDir: getWorkflowDir(),
     logsDir: getLogsDir(),
+    cacheDir: getCacheDir(),
     githubToken: token,
     sessionId: generateSessionId(),
     defaultRepository: getDefaultRepository(),

@@ -43,6 +43,31 @@ export const LIST_ISSUES_QUERY = `
   }
 `;
 
+export const LIST_ISSUES_DELTA_QUERY = `
+  query ListUpdatedIssues($owner: String!, $repo: String!, $since: DateTime!, $cursor: String) {
+    repository(owner: $owner, name: $repo) {
+      issues(first: 100, after: $cursor, filterBy: { since: $since }) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          number
+          title
+          body
+          state
+          url
+          createdAt
+          updatedAt
+          labels(first: 20) { nodes { name color description } }
+          assignees(first: 10) { nodes { login } }
+          parent { number state }
+        }
+      }
+    }
+  }
+`;
+
+// Delta response has identical shape to the full query — nodes include state: OPEN | CLOSED
+export type GQLListIssuesDeltaResponse = GQLListIssuesResponse;
+
 export const GET_PR_STATUS_QUERY = `
   query GetPrStatus($owner: String!, $repo: String!, $prNumber: Int!) {
     repository(owner: $owner, name: $repo) {

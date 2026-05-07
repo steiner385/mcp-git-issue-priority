@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GitHubService } from '../../src/services/github.js';
 import type { GQLListIssuesResponse } from '../../src/services/github-graphql.js';
+import { makeNullCache } from './null-cache.js';
 
 const makeIssueNode = (overrides: any = {}) => ({
   number: 1,
@@ -40,7 +41,7 @@ describe('GitHubService GraphQL — listOpenIssuesWithParents', () => {
       issues: { listForRepo: vi.fn() },
       request: vi.fn(),
     };
-    github = new GitHubService({ token: 'test-token' });
+    github = new GitHubService({ token: 'test-token', cacheService: makeNullCache() });
     (github as any).octokit = mockOctokit;
   });
 

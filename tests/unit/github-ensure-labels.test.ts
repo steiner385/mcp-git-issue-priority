@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GitHubService } from '../../src/services/github.js';
 import { LABEL_DEFINITIONS } from '../../src/models/issue.js';
+import { makeNullCache } from './null-cache.js';
 
 // Build the full set of 12 label names from LABEL_DEFINITIONS
 const ALL_LABEL_NAMES = [
@@ -28,7 +29,7 @@ describe('GitHubService.ensureLabelsExist — GraphQL bulk fetch', () => {
         createLabel: vi.fn().mockResolvedValue(undefined),
       },
     };
-    github = new GitHubService({ token: 'test-token' });
+    github = new GitHubService({ token: 'test-token', cacheService: makeNullCache() });
     (github as any).octokit = mockOctokit;
   });
 

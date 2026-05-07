@@ -6,15 +6,18 @@ import { LABEL_DEFINITIONS } from '../models/index.js';
 import {
   LIST_ISSUES_WITH_PARENTS_QUERY,
   LIST_ISSUES_QUERY,
+  LIST_ISSUES_DELTA_QUERY,
   GET_PR_STATUS_QUERY,
   GET_REPO_LABELS_QUERY,
   type GQLListIssuesResponse,
   type GQLListIssuesNoParentResponse,
+  type GQLListIssuesDeltaResponse,
   type GQLIssueNode,
   type GQLIssueNodeNoParent,
   type GQLPrStatusResponse,
   type GQLLabelsResponse,
 } from './github-graphql.js';
+import { type CacheService, type CachedIssues, getCacheService } from './cache.js';
 
 const ThrottledOctokit = Octokit.plugin(throttling, retry);
 
@@ -34,10 +37,12 @@ export interface CreateIssueParams {
 
 export interface GitHubServiceOptions {
   token: string;
+  cacheService?: CacheService;
 }
 
 export class GitHubService {
   private octokit: InstanceType<typeof ThrottledOctokit>;
+  private cacheService: CacheService;
 
   constructor(options: GitHubServiceOptions) {
     this.octokit = new ThrottledOctokit({
@@ -63,6 +68,7 @@ export class GitHubService {
         retries: 3,
       },
     });
+    this.cacheService = options.cacheService ?? getCacheService();
   }
 
   async ensureLabelsExist(owner: string, repo: string): Promise<void> {
@@ -72,14 +78,19 @@ export class GitHubService {
       ...LABEL_DEFINITIONS.status,
     };
 
+    const cached = await this.cacheService.getLabels(owner, repo);
+    if (cached) {
+      const cachedSet = new Set(cached);
+      if (Object.keys(allLabels).every((name) => cachedSet.has(name))) return;
+    }
+
     try {
-      // Single GraphQL call to fetch all existing repo labels at once.
-      // GET_REPO_LABELS_QUERY uses first:50 — sufficient for LABEL_DEFINITIONS (12 labels).
       type OctokitWithGraphQL = { graphql: <T>(query: string, vars?: Record<string, unknown>) => Promise<T> };
       const gql = this.octokit as unknown as OctokitWithGraphQL;
       const response = await gql.graphql<GQLLabelsResponse>(GET_REPO_LABELS_QUERY, { owner, repo });
       const existingNames = new Set(response.repository.labels.nodes.map((l) => l.name));
 
+      let createdAny = false;
       for (const [name, definition] of Object.entries(allLabels)) {
         if (!existingNames.has(name)) {
           await this.octokit.issues.createLabel({
@@ -89,10 +100,16 @@ export class GitHubService {
             color: definition.color,
             description: definition.description,
           });
+          createdAny = true;
         }
       }
+
+      if (createdAny) {
+        await this.cacheService.invalidateLabels(owner, repo);
+      } else {
+        await this.cacheService.setLabels(owner, repo, [...existingNames]);
+      }
     } catch {
-      // GraphQL unavailable — fall back to per-label REST GET-then-POST
       await this.ensureLabelsExistREST(owner, repo, allLabels);
     }
   }
@@ -136,20 +153,13 @@ export class GitHubService {
       labels,
     });
 
+    await this.cacheService.invalidateIssues(owner, repo);
     return this.mapApiIssue(response.data, owner, repo);
   }
 
   async listOpenIssues(owner: string, repo: string): Promise<Issue[]> {
-    const issues = await this.octokit.paginate(this.octokit.issues.listForRepo, {
-      owner,
-      repo,
-      state: 'open',
-      per_page: 100,
-    });
-
-    return issues
-      .filter((issue) => !issue.pull_request)
-      .map((issue) => this.mapApiIssue(issue, owner, repo));
+    const { issues } = await this.listOpenIssuesWithParents(owner, repo);
+    return issues;
   }
 
   async getIssue(owner: string, repo: string, issueNumber: number): Promise<Issue> {
@@ -166,23 +176,122 @@ export class GitHubService {
     owner: string,
     repo: string
   ): Promise<{ issues: Issue[]; dependencies: Map<number, number | null> }> {
-    // Attempt 1: GraphQL with parent field
-    try {
-      return await this.fetchIssuesGraphQL(owner, repo, true);
-    } catch {
-      // parent field may not be available — try without it
+    const cached = await this.cacheService.getIssues(owner, repo);
+
+    if (cached) {
+      try {
+        const deltaNodes = await this.fetchDeltaNodes(owner, repo, cached.lastModifiedAt);
+        const merged = this.mergeIssueDelta(owner, repo, cached.data, deltaNodes);
+        const lastModifiedAt = this.computeLastModifiedAt(merged.issues);
+        await this.cacheService.setIssues(owner, repo, merged, lastModifiedAt);
+        return {
+          issues: merged.issues,
+          dependencies: new Map(merged.dependencies),
+        };
+      } catch {
+        // Delta failed — fall through to full fetch
+      }
     }
 
-    // Attempt 2: GraphQL without parent field (still eliminates N+1 pagination)
+    let result: { issues: Issue[]; dependencies: Map<number, number | null> };
     try {
-      return await this.fetchIssuesGraphQL(owner, repo, false);
+      result = await this.fetchIssuesGraphQL(owner, repo, true);
     } catch {
-      // GraphQL entirely unavailable — fall back to REST
+      try {
+        result = await this.fetchIssuesGraphQL(owner, repo, false);
+      } catch {
+        const issues = await this.listOpenIssuesFallback(owner, repo);
+        result = { issues, dependencies: new Map() };
+      }
     }
 
-    // Attempt 3: REST fallback, no dependency info
-    const issues = await this.listOpenIssues(owner, repo);
-    return { issues, dependencies: new Map() };
+    const lastModifiedAt = this.computeLastModifiedAt(result.issues);
+    await this.cacheService.setIssues(
+      owner,
+      repo,
+      { issues: result.issues, dependencies: [...result.dependencies.entries()] },
+      lastModifiedAt
+    );
+    return result;
+  }
+
+  private async fetchDeltaNodes(
+    owner: string,
+    repo: string,
+    since: string
+  ): Promise<GQLIssueNode[]> {
+    type OctokitWithGraphQL = { graphql: <T>(query: string, vars?: Record<string, unknown>) => Promise<T> };
+    const gql = (this.octokit as unknown as OctokitWithGraphQL).graphql;
+    const allNodes: GQLIssueNode[] = [];
+    let cursor: string | null = null;
+
+    do {
+      const result = await gql<GQLListIssuesDeltaResponse>(
+        LIST_ISSUES_DELTA_QUERY,
+        { owner, repo, since, cursor }
+      );
+      const page = result.repository.issues;
+      allNodes.push(...(page.nodes as GQLIssueNode[]));
+      cursor = page.pageInfo.hasNextPage ? (page.pageInfo.endCursor ?? null) : null;
+    } while (cursor);
+
+    return allNodes;
+  }
+
+  private mergeIssueDelta(
+    owner: string,
+    repo: string,
+    cached: CachedIssues,
+    deltaNodes: GQLIssueNode[]
+  ): CachedIssues {
+    const issueMap = new Map<number, Issue>(cached.issues.map((i) => [i.number, i]));
+    const depMap = new Map<number, number | null>(cached.dependencies);
+
+    for (const node of deltaNodes) {
+      if (node.state === 'OPEN') {
+        issueMap.set(node.number, this.mapGQLNodeToIssue(node, owner, repo));
+        if (node.parent && node.parent.state === 'OPEN') {
+          depMap.set(node.number, node.parent.number);
+        } else {
+          depMap.delete(node.number);
+        }
+      } else {
+        issueMap.delete(node.number);
+        depMap.delete(node.number);
+      }
+    }
+
+    return {
+      issues: Array.from(issueMap.values()),
+      dependencies: [...depMap.entries()],
+    };
+  }
+
+  private computeLastModifiedAt(issues: Issue[]): string {
+    if (issues.length === 0) return new Date().toISOString();
+    return issues.reduce(
+      (max, i) => (i.updated_at > max ? i.updated_at : max),
+      issues[0].updated_at
+    );
+  }
+
+  private mapGQLNodeToIssue(node: GQLIssueNodeNoParent, owner: string, repo: string): Issue {
+    return {
+      number: node.number,
+      title: node.title,
+      body: node.body,
+      state: node.state.toLowerCase() as 'open' | 'closed',
+      created_at: node.createdAt,
+      updated_at: node.updatedAt,
+      labels: node.labels.nodes.map((l) => ({
+        name: l.name,
+        color: l.color,
+        description: l.description,
+      })),
+      assignees: node.assignees.nodes.map((a) => ({ login: a.login })),
+      html_url: node.url,
+      repository: { owner, repo, full_name: `${owner}/${repo}` },
+    };
   }
 
   private async fetchIssuesGraphQL(
@@ -207,22 +316,7 @@ export class GitHubService {
       cursor = issuesPage.pageInfo.hasNextPage ? (issuesPage.pageInfo.endCursor ?? null) : null;
     } while (cursor);
 
-    const issues: Issue[] = allNodes.map((node) => ({
-      number: node.number,
-      title: node.title,
-      body: node.body,
-      state: node.state.toLowerCase() as 'open' | 'closed',
-      created_at: node.createdAt,
-      updated_at: node.updatedAt,
-      labels: node.labels.nodes.map((l) => ({
-        name: l.name,
-        color: l.color,
-        description: l.description,
-      })),
-      assignees: node.assignees.nodes.map((a) => ({ login: a.login })),
-      html_url: node.url,
-      repository: { owner, repo, full_name: `${owner}/${repo}` },
-    }));
+    const issues: Issue[] = allNodes.map((node) => this.mapGQLNodeToIssue(node, owner, repo));
 
     const dependencies = new Map<number, number | null>();
     if (withParent) {
@@ -234,6 +328,18 @@ export class GitHubService {
     }
 
     return { issues, dependencies };
+  }
+
+  private async listOpenIssuesFallback(owner: string, repo: string): Promise<Issue[]> {
+    const issues = await this.octokit.paginate(this.octokit.issues.listForRepo, {
+      owner,
+      repo,
+      state: 'open',
+      per_page: 100,
+    });
+    return issues
+      .filter((issue) => !issue.pull_request)
+      .map((issue) => this.mapApiIssue(issue, owner, repo));
   }
 
   async updateIssueLabel(
@@ -266,6 +372,8 @@ export class GitHubService {
         labels: addLabels,
       });
     }
+
+    await this.cacheService.invalidateIssues(owner, repo);
   }
 
   async createBranch(
@@ -338,6 +446,7 @@ export class GitHubService {
       issue_number: issueNumber,
       state: 'closed',
     });
+    await this.cacheService.invalidateIssues(owner, repo);
   }
 
   async updateIssueState(
@@ -352,6 +461,7 @@ export class GitHubService {
       issue_number: issueNumber,
       state,
     });
+    await this.cacheService.invalidateIssues(owner, repo);
   }
 
   async verifyRepoAccess(owner: string, repo: string): Promise<boolean> {
@@ -377,7 +487,6 @@ export class GitHubService {
         { owner, repo, issue_number: issueNumber }
       );
 
-      // The sub_issues endpoint returns an object with a parent property, not an array
       const data = response.data as unknown as { parent?: { number: number; state: string } };
       if (data.parent) {
         return {
@@ -387,12 +496,14 @@ export class GitHubService {
       }
       return null;
     } catch {
-      // Graceful degradation - sub-issues API may not be available
       return null;
     }
   }
 
   async getPrStatus(owner: string, repo: string, prNumber: number): Promise<PrStatus> {
+    const cached = await this.cacheService.getPrStatus(owner, repo, prNumber);
+    if (cached) return cached;
+
     try {
       type OctokitWithGraphQL = { graphql: <T>(query: string, vars?: Record<string, unknown>) => Promise<T> };
       const result = await (this.octokit as unknown as OctokitWithGraphQL).graphql<GQLPrStatusResponse>(
@@ -429,7 +540,7 @@ export class GitHubService {
         ),
       ];
 
-      return {
+      const status: PrStatus = {
         prNumber,
         state,
         mergeable: pr.mergeable === 'MERGEABLE',
@@ -437,8 +548,12 @@ export class GitHubService {
         reviews: { approved, changesRequested, reviewers },
         autoMerge: { enabled: pr.autoMergeRequest !== null },
       };
+      await this.cacheService.setPrStatus(owner, repo, prNumber, status);
+      return status;
     } catch {
-      return this.getPrStatusREST(owner, repo, prNumber);
+      const status = await this.getPrStatusREST(owner, repo, prNumber);
+      await this.cacheService.setPrStatus(owner, repo, prNumber, status);
+      return status;
     }
   }
 
@@ -452,13 +567,11 @@ export class GitHubService {
     const pr = prResponse.data;
     const sha = pr.head.sha;
 
-    // Determine PR state
     let state: 'open' | 'closed' | 'merged' = pr.state as 'open' | 'closed';
     if (pr.state === 'closed' && pr.merged) {
       state = 'merged';
     }
 
-    // Get CI checks
     const checksResponse = await this.octokit.checks.listForRef({
       owner,
       repo,
@@ -472,7 +585,6 @@ export class GitHubService {
 
     const ciStatus = this.calculateCiStatus(checks);
 
-    // Get reviews
     const reviewsResponse = await this.octokit.request(
       'GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews',
       { owner, repo, pull_number: prNumber }

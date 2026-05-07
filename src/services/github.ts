@@ -21,6 +21,7 @@ import {
 } from './github-graphql.js';
 
 import { type CacheService, type CachedIssues, getCacheService } from './cache.js';
+import { type MetricsService, getMetricsService } from './metrics.js';
 
 const ThrottledOctokit = Octokit.plugin(throttling, retry);
 
@@ -41,11 +42,13 @@ export interface CreateIssueParams {
 export interface GitHubServiceOptions {
   token: string;
   cacheService?: CacheService;
+  metricsService?: MetricsService;
 }
 
 export class GitHubService {
   private octokit: InstanceType<typeof ThrottledOctokit>;
   private cacheService: CacheService;
+  private metrics: MetricsService;
 
   constructor(options: GitHubServiceOptions) {
     this.octokit = new ThrottledOctokit({
@@ -72,6 +75,7 @@ export class GitHubService {
       },
     });
     this.cacheService = options.cacheService ?? getCacheService();
+    this.metrics = options.metricsService ?? getMetricsService();
   }
 
   async ensureLabelsExist(owner: string, repo: string): Promise<void> {
@@ -84,13 +88,17 @@ export class GitHubService {
     const cached = await this.cacheService.getLabels(owner, repo);
     if (cached) {
       const cachedSet = new Set(cached);
-      if (Object.keys(allLabels).every((name) => cachedSet.has(name))) return;
+      if (Object.keys(allLabels).every((name) => cachedSet.has(name))) {
+        this.metrics.record('cache_hit', 'labels_cache_hit', owner, repo);
+        return;
+      }
     }
 
     try {
       type OctokitWithGraphQL = { graphql: <T>(query: string, vars?: Record<string, unknown>) => Promise<T> };
       const gql = this.octokit as unknown as OctokitWithGraphQL;
       const response = await gql.graphql<GQLLabelsResponse>(GET_REPO_LABELS_QUERY, { owner, repo });
+      this.metrics.record('graphql', 'labels_gql', owner, repo);
       const existingNames = new Set(response.repository.labels.nodes.map((l) => l.name));
 
       let createdAny = false;
@@ -103,6 +111,7 @@ export class GitHubService {
             color: definition.color,
             description: definition.description,
           });
+          this.metrics.record('rest', 'label_create_rest', owner, repo);
           createdAny = true;
         }
       }
@@ -125,6 +134,7 @@ export class GitHubService {
     for (const [name, definition] of Object.entries(allLabels)) {
       try {
         await this.octokit.issues.getLabel({ owner, repo, name });
+        this.metrics.record('rest', 'label_check_rest', owner, repo);
       } catch (error) {
         if ((error as { status?: number }).status === 404) {
           await this.octokit.issues.createLabel({
@@ -134,6 +144,7 @@ export class GitHubService {
             color: definition.color,
             description: definition.description,
           });
+          this.metrics.record('rest', 'label_create_rest', owner, repo);
         } else {
           throw error;
         }
@@ -155,6 +166,7 @@ export class GitHubService {
       body: body ?? '',
       labels,
     });
+    this.metrics.record('rest', 'issue_create_rest', owner, repo);
 
     const issue = this.mapApiIssue(response.data, owner, repo);
     await this.cacheService.addIssue(owner, repo, issue);
@@ -172,6 +184,7 @@ export class GitHubService {
       repo,
       issue_number: issueNumber,
     });
+    this.metrics.record('rest', 'issue_get_rest', owner, repo);
 
     return this.mapApiIssue(response.data, owner, repo);
   }
@@ -183,6 +196,7 @@ export class GitHubService {
     const cached = await this.cacheService.getIssues(owner, repo);
 
     if (cached) {
+      this.metrics.record('cache_hit', 'issues_cache_hit', owner, repo);
       try {
         const deltaNodes = await this.fetchDeltaNodes(owner, repo, cached.lastModifiedAt);
         const merged = this.mergeIssueDelta(owner, repo, cached.data, deltaNodes);
@@ -234,6 +248,7 @@ export class GitHubService {
         LIST_ISSUES_DELTA_QUERY,
         { owner, repo, since, cursor }
       );
+      this.metrics.record('graphql', 'issues_delta_gql', owner, repo);
       const page = result.repository.issues;
       allNodes.push(...(page.nodes as GQLIssueNode[]));
       cursor = page.pageInfo.hasNextPage ? (page.pageInfo.endCursor ?? null) : null;
@@ -307,6 +322,7 @@ export class GitHubService {
     const gql = (this.octokit as unknown as OctokitWithGraphQL).graphql;
 
     const query = withParent ? LIST_ISSUES_WITH_PARENTS_QUERY : LIST_ISSUES_QUERY;
+    const operation = withParent ? 'issues_full_gql' : 'issues_no_parent_gql';
     const allNodes: Array<GQLIssueNode | GQLIssueNodeNoParent> = [];
     let cursor: string | null = null;
 
@@ -315,6 +331,7 @@ export class GitHubService {
         query,
         { owner, repo, cursor }
       );
+      this.metrics.record('graphql', operation, owner, repo);
       const issuesPage: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: Array<GQLIssueNode | GQLIssueNodeNoParent> } = result.repository.issues;
       allNodes.push(...issuesPage.nodes);
       cursor = issuesPage.pageInfo.hasNextPage ? (issuesPage.pageInfo.endCursor ?? null) : null;
@@ -341,6 +358,7 @@ export class GitHubService {
       state: 'open',
       per_page: 100,
     });
+    this.metrics.record('rest', 'issues_rest_fallback', owner, repo);
     return issues
       .filter((issue) => !issue.pull_request)
       .map((issue) => this.mapApiIssue(issue, owner, repo));
@@ -361,6 +379,7 @@ export class GitHubService {
           issue_number: issueNumber,
           name: label,
         });
+        this.metrics.record('rest', 'label_remove_rest', owner, repo);
       } catch (error) {
         if ((error as { status?: number }).status !== 404) {
           throw error;
@@ -375,6 +394,7 @@ export class GitHubService {
         issue_number: issueNumber,
         labels: addLabels,
       });
+      this.metrics.record('rest', 'label_add_rest', owner, repo);
     }
 
     await this.cacheService.patchIssueLabels(owner, repo, issueNumber, addLabels, removeLabels);
@@ -391,6 +411,7 @@ export class GitHubService {
       repo,
       ref: `heads/${baseBranch}`,
     });
+    this.metrics.record('rest', 'ref_get_rest', owner, repo);
 
     const sha = baseRef.data.object.sha;
 
@@ -400,6 +421,7 @@ export class GitHubService {
       ref: `refs/heads/${branchName}`,
       sha,
     });
+    this.metrics.record('rest', 'ref_create_rest', owner, repo);
 
     return branchName;
   }
@@ -422,6 +444,7 @@ export class GitHubService {
       head: params.head,
       base: params.base ?? 'main',
     });
+    this.metrics.record('rest', 'pr_create_rest', owner, repo);
 
     return {
       number: response.data.number,
@@ -441,6 +464,7 @@ export class GitHubService {
       issue_number: issueNumber,
       body,
     });
+    this.metrics.record('rest', 'issue_comment_rest', owner, repo);
   }
 
   async closeIssue(owner: string, repo: string, issueNumber: number): Promise<void> {
@@ -450,6 +474,7 @@ export class GitHubService {
       issue_number: issueNumber,
       state: 'closed',
     });
+    this.metrics.record('rest', 'issue_close_rest', owner, repo);
     await this.cacheService.evictIssue(owner, repo, issueNumber);
   }
 
@@ -465,6 +490,7 @@ export class GitHubService {
       issue_number: issueNumber,
       state,
     });
+    this.metrics.record('rest', 'issue_state_rest', owner, repo);
     if (state === 'closed') {
       await this.cacheService.evictIssue(owner, repo, issueNumber);
     } else {
@@ -475,6 +501,7 @@ export class GitHubService {
   async verifyRepoAccess(owner: string, repo: string): Promise<boolean> {
     try {
       const response = await this.octokit.repos.get({ owner, repo });
+      this.metrics.record('rest', 'repo_access_rest', owner, repo);
       return response.data.permissions?.push ?? false;
     } catch (error) {
       if ((error as { status?: number }).status === 404) {
@@ -494,6 +521,7 @@ export class GitHubService {
         'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
         { owner, repo, issue_number: issueNumber }
       );
+      this.metrics.record('rest', 'issue_parent_rest', owner, repo);
 
       const data = response.data as unknown as { parent?: { number: number; state: string } };
       if (data.parent) {
@@ -510,7 +538,10 @@ export class GitHubService {
 
   async getPrStatus(owner: string, repo: string, prNumber: number): Promise<PrStatus> {
     const cached = await this.cacheService.getPrStatus(owner, repo, prNumber);
-    if (cached) return cached;
+    if (cached) {
+      this.metrics.record('cache_hit', 'pr_status_cache_hit', owner, repo);
+      return cached;
+    }
 
     try {
       type OctokitWithGraphQL = { graphql: <T>(query: string, vars?: Record<string, unknown>) => Promise<T> };
@@ -518,6 +549,7 @@ export class GitHubService {
         GET_PR_STATUS_QUERY,
         { owner, repo, prNumber }
       );
+      this.metrics.record('graphql', 'pr_status_gql', owner, repo);
 
       const pr = result.repository.pullRequest;
       if (!pr) {
@@ -571,6 +603,7 @@ export class GitHubService {
       repo,
       pull_number: prNumber,
     });
+    this.metrics.record('rest', 'pr_status_rest', owner, repo);
 
     const pr = prResponse.data;
     const sha = pr.head.sha;
@@ -585,6 +618,7 @@ export class GitHubService {
       repo,
       ref: sha,
     });
+    this.metrics.record('rest', 'pr_checks_rest', owner, repo);
 
     const checks: CheckStatus[] = checksResponse.data.check_runs.map((run) => ({
       name: run.name,
@@ -597,6 +631,7 @@ export class GitHubService {
       'GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews',
       { owner, repo, pull_number: prNumber }
     );
+    this.metrics.record('rest', 'pr_reviews_rest', owner, repo);
 
     const reviews = reviewsResponse.data;
     const approved = reviews.some((r: any) => r.state === 'APPROVED');

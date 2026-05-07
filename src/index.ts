@@ -10,6 +10,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createConfig, ensureDirectories, setConfig } from './config/index.js';
 import { initializeLogger } from './services/logging.js';
 import { initializeCacheService } from './services/cache.js';
+import { initializeMetricsService } from './services/metrics.js';
 import { initializeGitHubService } from './services/github.js';
 
 import { registerCreateIssueTool } from './tools/create-issue.js';
@@ -26,6 +27,7 @@ import { registerBulkUpdateIssuesTool } from './tools/bulk-update-issues.js';
 import { registerImplementBatchTool } from './tools/implement-batch.js';
 import { registerBatchContinueTool } from './tools/batch-continue.js';
 import { registerGetWorkflowAnalyticsTool } from './tools/get-workflow-analytics.js';
+import { registerGetApiMetricsTool } from './tools/get-api-metrics.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
@@ -88,6 +90,7 @@ async function main() {
 
     initializeLogger(config.sessionId);
     initializeCacheService(config.cacheDir);
+    initializeMetricsService(config.metricsDir);
     initializeGitHubService(config.githubToken);
 
     const server = new McpServer({
@@ -109,6 +112,7 @@ async function main() {
     registerImplementBatchTool(server);
     registerBatchContinueTool(server);
     registerGetWorkflowAnalyticsTool(server);
+    registerGetApiMetricsTool(server);
 
     const transport = new StdioServerTransport();
     await server.connect(transport);

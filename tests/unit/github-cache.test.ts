@@ -4,6 +4,7 @@ import { type CachedIssues } from '../../src/services/cache.js';
 import type { Issue } from '../../src/models/index.js';
 import type { PrStatus } from '../../src/models/index.js';
 import { makeNullCache } from './null-cache.js';
+import { makeNullMetrics } from './null-metrics.js';
 
 export { makeNullCache };
 
@@ -57,7 +58,7 @@ describe('GitHubService — cache reads', () => {
 
   beforeEach(() => {
     mockCache = makeNullCache();
-    github = new GitHubService({ token: 'test-token', cacheService: mockCache });
+    github = new GitHubService({ token: 'test-token', cacheService: mockCache, metricsService: makeNullMetrics() });
     mockOctokit = {
       graphql: vi.fn(),
       paginate: vi.fn(),
@@ -240,7 +241,7 @@ describe('GitHubService — cache invalidations on writes', () => {
 
   beforeEach(() => {
     mockCache = makeNullCache();
-    github = new GitHubService({ token: 'test-token', cacheService: mockCache });
+    github = new GitHubService({ token: 'test-token', cacheService: mockCache, metricsService: makeNullMetrics() });
     mockOctokit = {
       issues: {
         removeLabel: vi.fn().mockResolvedValue(undefined),

@@ -229,7 +229,7 @@ export class GitHubService {
     let cursor: string | null = null;
 
     do {
-      const result = await gql<GQLListIssuesDeltaResponse>(
+      const result: GQLListIssuesDeltaResponse = await gql<GQLListIssuesDeltaResponse>(
         LIST_ISSUES_DELTA_QUERY,
         { owner, repo, since, cursor }
       );

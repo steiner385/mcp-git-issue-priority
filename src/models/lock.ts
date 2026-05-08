@@ -58,4 +58,4 @@ export async function isProcessAlive(pid: number): Promise<boolean> {
   }
 }
 
-export const LOCK_STALE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+export const LOCK_STALE_TIMEOUT_MS = 8 * 60 * 60 * 1000; // 8 hours

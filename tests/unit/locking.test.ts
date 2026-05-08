@@ -312,7 +312,7 @@ describe('LockingService', () => {
       expect(swept).toBe(0);
     });
 
-    it('does not sweep fresh locks held by live processes', async () => {
+    it('does not sweep fresh locks', async () => {
       const { testDir, sessionId } = await createTestEnv();
       const lockingService = new LockingService(sessionId, testDir);
 
@@ -326,11 +326,11 @@ describe('LockingService', () => {
       expect(remaining.length).toBe(2);
     });
 
-    it('removes locks belonging to dead processes', async () => {
+    it('does not sweep fresh locks with dead PIDs (cross-session locks must survive)', async () => {
       const { testDir, sessionId } = await createTestEnv();
       const lockingService = new LockingService(sessionId, testDir);
 
-      // Hand-write a lock file with a PID that does not exist
+      // Hand-write a lock file with a PID that does not exist — but acquired just now
       const deadPidLock = createLock(200, 'owner/repo', randomUUID(), 999999999);
       const lockPath = join(testDir, getLockFileName('owner', 'repo', 200));
       const { writeFile } = await import('fs/promises');
@@ -339,27 +339,27 @@ describe('LockingService', () => {
       // And a normal live lock alongside it
       await lockingService.acquireLock('owner', 'repo', 201);
 
+      // Neither lock is old enough to be stale — dead PID alone is not a staleness signal
       const swept = await lockingService.sweepStaleLocks();
       const remaining = await lockingService.listLocks();
 
-      expect(swept).toBe(1);
-      expect(remaining.length).toBe(1);
-      expect(remaining[0].issueNumber).toBe(201);
+      expect(swept).toBe(0);
+      expect(remaining.length).toBe(2);
     });
 
     it('removes locks older than the stale-timeout regardless of PID liveness', async () => {
       const { testDir, sessionId } = await createTestEnv();
       const lockingService = new LockingService(sessionId, testDir);
 
-      // Hand-write a lock acquired 2 hours ago by THIS process (live PID)
-      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      // Hand-write a lock acquired 9 hours ago by THIS process (live PID) — exceeds the 8-hour timeout
+      const nineHoursAgo = new Date(Date.now() - 9 * 60 * 60 * 1000).toISOString();
       const oldLock = {
         issueNumber: 300,
         repoFullName: 'owner/repo',
         pid: process.pid,
         sessionId: randomUUID(),
-        acquiredAt: twoHoursAgo,
-        lastUpdated: twoHoursAgo,
+        acquiredAt: nineHoursAgo,
+        lastUpdated: nineHoursAgo,
       };
       const lockPath = join(testDir, getLockFileName('owner', 'repo', 300));
       const { writeFile } = await import('fs/promises');

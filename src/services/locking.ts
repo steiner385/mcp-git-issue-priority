@@ -7,7 +7,6 @@ import {
   getLockFileName,
   parseLockFileName,
   validateLock,
-  isProcessAlive,
   LOCK_STALE_TIMEOUT_MS,
 } from '../models/index.js';
 
@@ -147,16 +146,7 @@ export class LockingService {
 
   async isLockStale(lockData: Lock): Promise<boolean> {
     const lockAge = Date.now() - new Date(lockData.acquiredAt).getTime();
-    if (lockAge > LOCK_STALE_TIMEOUT_MS) {
-      return true;
-    }
-
-    const processAlive = await isProcessAlive(lockData.pid);
-    if (!processAlive) {
-      return true;
-    }
-
-    return false;
+    return lockAge > LOCK_STALE_TIMEOUT_MS;
   }
 
   async readLockFile(owner: string, repo: string, issueNumber: number): Promise<Lock | null> {

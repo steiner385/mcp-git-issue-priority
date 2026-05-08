@@ -90,14 +90,15 @@ describe('claim_issue handler', () => {
     it('reports the count of stale locks swept before acquisition', async () => {
       const { deps, locking, locksDir } = await createEnv();
 
-      // Plant a stale lock (dead PID) for an unrelated issue
+      // Plant a stale lock (9-hour-old timestamp, exceeds the 8-hour timeout) for an unrelated issue
+      const nineHoursAgo = new Date(Date.now() - 9 * 60 * 60 * 1000).toISOString();
       const stale = {
         issueNumber: 998,
         repoFullName: 'tester/sample',
-        pid: 999999999,
+        pid: process.pid,
         sessionId: randomUUID(),
-        acquiredAt: new Date().toISOString(),
-        lastUpdated: new Date().toISOString(),
+        acquiredAt: nineHoursAgo,
+        lastUpdated: nineHoursAgo,
       };
       await writeFile(
         join(locksDir, getLockFileName('tester', 'sample', 998)),
